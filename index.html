@@ -13,8 +13,6 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     * { font-family: 'Plus Jakarta Sans', sans-serif; }
-    
-    /* Layout Cetak A4 Presisi (6 Kartu per Halaman: 2 Kolom x 3 Baris) */
     @media print {
       body * { visibility: hidden; }
       #print-section, #print-section * { visibility: visible; }
@@ -38,7 +36,6 @@
       }
       .no-print { display: none !important; }
     }
-
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: #f1f5f9; }
     ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 9999px; }
@@ -201,7 +198,7 @@
               </div>
             </div>
 
-            <div class="mt-6 pt-4 border-t border-slate-100">
+            <div class="mt-6 pt-4 border-t border-slate-100" id="scan-mode-area">
               <label class="block text-xs font-bold text-slate-600 uppercase mb-2">Status Kehadiran:</label>
               <div class="grid grid-cols-4 gap-2">
                 <button onclick="setScanMode('Hadir')" id="mode-Hadir" class="scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-emerald-500 bg-emerald-50 text-emerald-700"><i class="fa-solid fa-check mr-1"></i> Hadir</button>
@@ -582,6 +579,47 @@
       return json;
     }
 
+    /* ========= Normalisasi attendance logs ========= */
+    function normalizeAttendanceLogs(rawLogs) {
+      if (!Array.isArray(rawLogs)) return [];
+      return rawLogs.map(orig => {
+        const l = Object.assign({}, orig);
+
+        // tanggal
+        let d = (l.date || '').toString().trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) {
+          const m = d.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+          if (m) {
+            let dd = Number(m[1]), mm = Number(m[2]), yy = Number(m[3]);
+            if (yy < 100) yy += 2000;
+            const dt = new Date(yy, mm - 1, dd);
+            if (!isNaN(dt.getTime())) d = dt.toISOString().split('T')[0];
+          } else {
+            const tryFromTimestamp = l.timestamp ? new Date(l.timestamp) : new Date(d);
+            if (!isNaN(tryFromTimestamp.getTime())) d = tryFromTimestamp.toISOString().split('T')[0];
+          }
+        }
+        if (!d) d = new Date().toISOString().split('T')[0];
+        l.date = d;
+
+        // jenisAbsen
+        let jenis = (l.jenisAbsen || '').toString().trim();
+        if (!jenis && l.method) {
+          const parts = String(l.method).split('|');
+          jenis = parts.length > 1 ? parts[1] : (parts[0] || '');
+        }
+        l.jenisAbsen = jenis || 'Masuk Sekolah';
+
+        l.status = l.status || '';
+        if (l.nisn !== undefined && l.nisn !== null) l.nisn = String(l.nisn).trim();
+        if (l.nip !== undefined && l.nip !== null) l.nip = String(l.nip).trim();
+        l.nama = l.nama || '';
+        l.kelas = l.kelas || '';
+
+        return l;
+      });
+    }
+
     /* ============ INIT ============ */
     function initApp() {
       showSyncBadge("Memuat Data...", "loading");
@@ -592,31 +630,17 @@
       if (data) {
         students = data.students || [];
         teachers = data.teachers || [];
-        attendanceLogs = data.attendanceLogs || [];
+        // normalize attendance logs
+        attendanceLogs = normalizeAttendanceLogs(data.attendanceLogs || []);
         classList = data.classList || [];
         academicYearList = data.academicYearList || [];
         if (academicYearList.length === 0) academicYearList = ['2025/2026','2026/2027','2027/2028'];
         if (data.schoolProfile) schoolProfile = Object.assign(schoolProfile, data.schoolProfile);
         if (data.academicYear && data.academicYear.tahunPelajaran) academicYear = data.academicYear;
 
-        // parse method to extract jenisAbsen if present (we saved as "QR Code|Masuk Sekolah")
-        attendanceLogs = attendanceLogs.map(l => {
-          const copy = Object.assign({}, l);
-          if (copy.method && String(copy.method).indexOf('|') !== -1) {
-            const parts = String(copy.method).split('|');
-            // method stored as "origMethod|JenisAbsen"
-            copy.method = parts[0];
-            copy.jenisAbsen = parts[1] || '';
-          } else {
-            // fallback: try to infer from columns (not available in generic sheet), set default
-            copy.jenisAbsen = copy.jenisAbsen || 'Masuk Sekolah';
-          }
-          return copy;
-        });
-
         applySchoolProfileUI(); updateAllDropdowns(); renderKelasTable(); renderTahunTable();
         updateDashboardStats(); renderRecentTable(); renderSiswaTable(); renderGuruTable(); renderRekapTable();
-        renderKtsCards(); initChart();
+        renderKtsCards(); initChart(); renderBelumAbsenTable();
         showSyncBadge("Terkoneksi ke Sheet", "success");
       }
     }
@@ -677,8 +701,8 @@
     function toggleMobileMenu() { document.getElementById('mobile-drawer').classList.toggle('hidden'); }
     function updateLiveClock() {
       const now = new Date();
-      const lc = document.getElementById('live-clock'); if (lc) lc.innerText = now.toLocaleTimeString('id-ID');
-      const cd = document.getElementById('current-date-display'); if (cd) cd.innerText = now.toLocaleDateString('id-ID', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+      document.getElementById('live-clock').innerText = now.toLocaleTimeString('id-ID');
+      document.getElementById('current-date-display').innerText = now.toLocaleDateString('id-ID', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
     }
 
     /* ============ KAMERA ============ */
@@ -728,71 +752,59 @@
     function onScanSuccess(decodedText) { processAttendanceScan(decodedText.trim(), 'QR Code'); }
     function onScanFailure(error) {}
 
+    /* ============ SCAN MODE & JENIS (Pulang special handling) ============ */
     function setScanMode(mode) {
-  // Jangan ubah mode jika jenis absen Pulang (kontrol terpisah)
-  if (currentJenisAbsen === 'Pulang') {
-    // hanya izinkan 'Pulang' atau 'Belum Pulang' dari kontrol pulang
-    return;
-  }
-  currentScanMode = mode;
-  document.querySelectorAll('.scan-mode-btn').forEach(b => b.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-slate-200 bg-slate-50 text-slate-600");
-  const a = document.getElementById('mode-' + mode);
-  if (a) a.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
-}
-
-function setJenisAbsen(jenis) {
-  currentJenisAbsen = jenis;
-  // Reset semua jenis-absen buttons
-  document.querySelectorAll('.jenis-absen-btn').forEach(b => b.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-slate-200 bg-white text-slate-700");
-  const a = document.getElementById('jenis-' + jenis);
-  if (a) a.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-indigo-600 bg-indigo-600 text-white shadow-xs";
-
-  // Manage status control area
-  // Temukan container orang untuk tombol status (parent dari mode-Hadir atau area known)
-  const statusContainer = document.querySelector('.scan-mode-btn') ? document.getElementById('mode-Hadir')?.parentElement : null;
-  // fallback: cari container dengan grid
-  let container = document.querySelector('.grid.grid-cols-4.gap-2');
-  if (!container && statusContainer) container = statusContainer;
-
-  if (jenis === 'Pulang') {
-    currentScanMode = 'Pulang';
-    // Sembunyikan semua scan-mode normal
-    document.querySelectorAll('.scan-mode-btn').forEach(b => b.style.display = 'none');
-
-    // Hasil : tampilkan kontrol pulang/belum pulang
-    if (container) {
-      // tandai agar kita bisa restore nanti
-      if (!container.dataset.originalHtml) container.dataset.originalHtml = container.innerHTML;
-      container.innerHTML = `
-        <button id="mode-Pulang" onclick="setPulangMode('Pulang')" class="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Pulang</button>
-        <button id="mode-BelumPulang" onclick="setPulangMode('Belum Pulang')" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold">Belum Pulang</button>
-      `;
+      // Jika saat ini jenis absen Pulang, jangan ubah scan-mode umum
+      if (currentJenisAbsen === 'Pulang') {
+        return;
+      }
+      currentScanMode = mode;
+      document.querySelectorAll('.scan-mode-btn').forEach(b => b.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-slate-200 bg-slate-50 text-slate-600");
+      const a = document.getElementById('mode-' + mode);
+      if (a) a.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
     }
-  } else {
-    // restore normal control
-    if (container && container.dataset && container.dataset.originalHtml) {
-      container.innerHTML = container.dataset.originalHtml;
-      delete container.dataset.originalHtml;
-    } else {
-      document.querySelectorAll('.scan-mode-btn').forEach(b => { b.style.display = ''; });
-    }
-    // set default mode to Hadir
-    currentScanMode = 'Hadir';
-    // ensure UI highlight for Hadir
-    const had = document.getElementById('mode-Hadir');
-    if (had) had.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
-  }
-}
 
-// handler khusus untuk tombol pulang
-function setPulangMode(m) {
-  currentScanMode = m === 'Belum Pulang' ? 'Belum Pulang' : 'Pulang';
-  // update visual (highlight)
-  const pul = document.getElementById('mode-Pulang');
-  const bp = document.getElementById('mode-BelumPulang');
-  if (pul) pul.className = currentScanMode === 'Pulang' ? 'px-3 py-2 bg-indigo-700 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold';
-  if (bp) bp.className = currentScanMode === 'Belum Pulang' ? 'px-3 py-2 bg-rose-500 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold';
-}
+    function setJenisAbsen(jenis) {
+      currentJenisAbsen = jenis;
+      document.querySelectorAll('.jenis-absen-btn').forEach(b => b.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-slate-200 bg-white text-slate-700");
+      const a = document.getElementById('jenis-' + jenis);
+      if (a) a.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-indigo-600 bg-indigo-600 text-white shadow-xs";
+
+      const container = document.getElementById('scan-mode-area');
+      if (jenis === 'Pulang') {
+        currentScanMode = 'Pulang';
+        // hide normal modes
+        document.querySelectorAll('.scan-mode-btn').forEach(b => b.style.display = 'none');
+        if (container) {
+          if (!container.dataset.originalHtml) container.dataset.originalHtml = container.innerHTML;
+          container.innerHTML = `
+            <label class="block text-xs font-bold text-slate-600 uppercase mb-2">Status Pulang:</label>
+            <div class="flex gap-2">
+              <button id="mode-Pulang" onclick="setPulangMode('Pulang')" class="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Pulang</button>
+              <button id="mode-BelumPulang" onclick="setPulangMode('Belum Pulang')" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold">Belum Pulang</button>
+            </div>`;
+        }
+      } else {
+        // restore
+        if (container && container.dataset && container.dataset.originalHtml) {
+          container.innerHTML = container.dataset.originalHtml;
+          delete container.dataset.originalHtml;
+        } else {
+          document.querySelectorAll('.scan-mode-btn').forEach(b => { b.style.display = ''; });
+        }
+        currentScanMode = 'Hadir';
+        const had = document.getElementById('mode-Hadir');
+        if (had) had.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
+      }
+    }
+
+    function setPulangMode(m) {
+      currentScanMode = m === 'Belum Pulang' ? 'Belum Pulang' : 'Pulang';
+      const pul = document.getElementById('mode-Pulang');
+      const bp = document.getElementById('mode-BelumPulang');
+      if (pul) pul.className = currentScanMode === 'Pulang' ? 'px-3 py-2 bg-indigo-700 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold';
+      if (bp) bp.className = currentScanMode === 'Belum Pulang' ? 'px-3 py-2 bg-rose-500 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold';
+    }
 
     function handleManualInput(e) {
       e.preventDefault();
@@ -821,7 +833,7 @@ function setPulangMode(m) {
 
       // VALIDASI ANTI-DUPLIKAT SCAN PER HARI & SESI
       const isAlreadyScanned = attendanceLogs.some(log => 
-        String(log.nisn) === String(idCode) && 
+        (String(log.nisn) === String(idCode) || String(log.nip) === String(idCode)) && 
         log.date === todayStr && 
         log.jenisAbsen === currentJenisAbsen
       );
@@ -833,33 +845,36 @@ function setPulangMode(m) {
       }
 
       // For non-Pulang auto status Hadir; for Pulang status Pulang
-      const statusToSave = (currentJenisAbsen === 'Pulang') ? 'Pulang' : 'Hadir';
+      const statusToSave = (currentJenisAbsen === 'Pulang') ? currentScanMode === 'Belum Pulang' ? 'Belum Pulang' : 'Pulang' : 'Hadir';
 
       const nowLocal = new Date();
       const logEntry = {
         timestamp: nowLocal.toLocaleString('id-ID'),
         date: todayStr,
         time: nowLocal.toLocaleTimeString('id-ID'),
-        nisn: idCode,
+        nisn: isSiswa ? idCode : '',
+        nip: isSiswa ? '' : idCode,
         nama: personName,
         kelas: personClass,
         jenisAbsen: currentJenisAbsen,
         status: statusToSave,
         peran: personRole,
-        method: method
+        method: `${method}|${currentJenisAbsen}`
       };
 
-      // Store method with jenisAbsen so backend still saves jenis info into sheet (in 'method' column)
-      const methodForBackend = `${method}|${currentJenisAbsen}`;
-
-      attendanceLogs.unshift(Object.assign({}, logEntry, { method: methodForBackend }));
+      // push locally for instant UI feedback
+      attendanceLogs.unshift(Object.assign({}, logEntry));
       updateDashboardStats(); renderRecentTable(); renderRekapTable(); renderBelumAbsenTable(); renderScanResultCard(logEntry);
       showToast(`Absensi [${currentJenisAbsen} - ${statusToSave}] Berhasil: ${personName}`);
       showSyncBadge("Menyimpan ke Sheet...", "loading");
-      apiPost('saveAbsensi', Object.assign({}, logEntry, { method: methodForBackend }))
+
+      apiPost('saveAbsensi', logEntry)
         .then(res => {
-          if (res && res.status === 'success') showSyncBadge("Tersimpan di Sheet", "success");
-          else onGASFailure(res && res.message ? res.message : res);
+          if (res && res.status === 'success') {
+            showSyncBadge("Tersimpan di Sheet", "success");
+            // refresh canonical data
+            apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
+          } else onGASFailure(res && res.message ? res.message : res);
         })
         .catch(onGASFailure);
     }
@@ -869,7 +884,7 @@ function setPulangMode(m) {
         <div class="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center text-3xl mb-3 shadow-inner"><i class="fa-solid fa-check"></i></div>
         <span class="px-3 py-1 bg-emerald-50 text-emerald-700 font-bold rounded-full text-xs mb-1 border border-emerald-200">${log.jenisAbsen} (${log.status})</span>
         <h4 class="font-extrabold text-slate-800 text-lg mt-1">${log.nama}</h4>
-        <p class="text-xs font-semibold text-slate-500 mb-1">ID: ${log.nisn} | ${log.peran}: ${log.kelas}</p>
+        <p class="text-xs font-semibold text-slate-500 mb-1">ID: ${log.nisn || log.nip} | ${log.peran}: ${log.kelas}</p>
         <p class="text-[11px] text-indigo-600 font-bold"><i class="fa-regular fa-clock mr-1"></i>${log.time}</p>`;
     }
 
@@ -961,6 +976,8 @@ function setPulangMode(m) {
             showSyncBadge("Siswa Berhasil Diimport", "success");
             showToast(`Berhasil mengimpor data ${type}`);
             renderKtsCards(); updateDashboardStats();
+            // refresh canonical data
+            apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
           })();
         } else {
           (async () => {
@@ -980,6 +997,7 @@ function setPulangMode(m) {
             showSyncBadge("Guru Berhasil Diimport", "success");
             showToast(`Berhasil mengimpor data ${type}`);
             renderKtsCards(); updateDashboardStats();
+            apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
           })();
         }
       };
@@ -1032,11 +1050,13 @@ function setPulangMode(m) {
         }
         const res = await apiPost('saveSiswa', siswaObj);
         if (res && res.status === 'success') {
-          showSyncBadge("Siswa Tersimpan di Sheet", "success");
+          showSyncBadge("Siswa Tersimpan di Sheet', 'success");
           if (res.fotoUrl) {
             const i = students.findIndex(s => String(s.nisn) === String(siswaObj.nisn));
             if (i >= 0) { students[i].fotoUrl = res.fotoUrl; renderSiswaTable(); renderKtsCards(); }
           }
+          // refresh canonical data
+          apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
         } else {
           onGASFailure(res && res.message ? res.message : res);
         }
@@ -1051,7 +1071,7 @@ function setPulangMode(m) {
         renderSiswaTable(); renderKtsCards(); updateDashboardStats(); showToast("Siswa dihapus");
         showSyncBadge("Menghapus Siswa...", "loading");
         apiPost('deleteSiswa', { nisn: nisn })
-          .then(res => { if (res && res.status === 'success') showSyncBadge("Siswa Dihapus dari Sheet", "success"); else onGASFailure(res); })
+          .then(res => { if (res && res.status === 'success') { showSyncBadge("Siswa Dihapus dari Sheet", "success"); apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);} else onGASFailure(res); })
           .catch(onGASFailure);
       }
     }
@@ -1122,8 +1142,10 @@ function setPulangMode(m) {
       try {
         if (guruObj.fotoUrl && String(guruObj.fotoUrl).startsWith('data:')) guruObj.fotoBase64 = guruObj.fotoUrl;
         const res = await apiPost('saveGuru', guruObj);
-        if (res && res.status === 'success') showSyncBadge("Guru Tersimpan di Sheet", "success");
-        else onGASFailure(res && res.message ? res.message : res);
+        if (res && res.status === 'success') {
+          showSyncBadge("Guru Tersimpan di Sheet", "success");
+          apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
+        } else onGASFailure(res && res.message ? res.message : res);
       } catch (err) { onGASFailure(err); }
     }
 
@@ -1133,7 +1155,7 @@ function setPulangMode(m) {
         renderGuruTable(); renderKtsCards(); updateDashboardStats(); showToast("Guru dihapus");
         showSyncBadge("Menghapus Guru...", "loading");
         apiPost('deleteGuru', { nip: nip })
-          .then(res => { if (res && res.status === 'success') showSyncBadge("Guru Dihapus dari Sheet", "success"); else onGASFailure(res); })
+          .then(res => { if (res && res.status === 'success') { showSyncBadge("Guru Dihapus dari Sheet", "success"); apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);} else onGASFailure(res); })
           .catch(onGASFailure);
       }
     }
@@ -1167,7 +1189,7 @@ function setPulangMode(m) {
       classList.push(nama); input.value = ''; renderKelasTable(); updateAllDropdowns(); showToast("Kelas ditambahkan");
       showSyncBadge("Menyimpan Kelas...", "loading");
       apiPost('saveKelas', { nama: nama }).then(res => {
-        if (res && res.status === 'success') showSyncBadge("Kelas Tersimpan", "success"); else onGASFailure(res);
+        if (res && res.status === 'success') { showSyncBadge("Kelas Tersimpan", "success"); apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);} else onGASFailure(res);
       }).catch(onGASFailure);
     }
 
@@ -1177,7 +1199,7 @@ function setPulangMode(m) {
         classList.splice(index, 1); renderKelasTable(); updateAllDropdowns();
         showSyncBadge("Menghapus Kelas...", "loading");
         apiPost('deleteKelas', { nama: nama }).then(res => {
-          if (res && res.status === 'success') showSyncBadge("Kelas Dihapus", "success"); else onGASFailure(res);
+          if (res && res.status === 'success') { showSyncBadge("Kelas Dihapus", "success"); apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);} else onGASFailure(res);
         }).catch(onGASFailure);
       }
     }
@@ -1198,7 +1220,7 @@ function setPulangMode(m) {
       academicYearList.push(val); input.value = ''; renderTahunTable(); updateAllDropdowns();
       showSyncBadge("Menyimpan Tahun...", "loading");
       apiPost('saveTahun', { val: val }).then(res => {
-        if (res && res.status === 'success') showSyncBadge("Tahun Pelajaran Tersimpan", "success"); else onGASFailure(res);
+        if (res && res.status === 'success') { showSyncBadge("Tahun Pelajaran Tersimpan", "success"); apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);} else onGASFailure(res);
       }).catch(onGASFailure);
     }
 
@@ -1247,8 +1269,10 @@ function setPulangMode(m) {
         }
 
         const res = await apiPost('savePengaturan', { schoolProfile: schoolProfile, academicYear: academicYear });
-        if (res && res.status === 'success') showSyncBadge("Profil Tersimpan", "success");
-        else onGASFailure(res && res.message ? res.message : res);
+        if (res && res.status === 'success') {
+          showSyncBadge("Profil Tersimpan", "success");
+          apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
+        } else onGASFailure(res && res.message ? res.message : res);
       } catch (err) {
         onGASFailure(err);
       }
@@ -1262,8 +1286,10 @@ function setPulangMode(m) {
       showSyncBadge("Menyimpan Periode...", "loading");
       try {
         const res = await apiPost('savePengaturan', { schoolProfile: schoolProfile, academicYear: academicYear });
-        if (res && res.status === 'success') showSyncBadge("Periode Tersimpan", "success");
-        else onGASFailure(res && res.message ? res.message : res);
+        if (res && res.status === 'success') {
+          showSyncBadge("Periode Tersimpan", "success");
+          apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
+        } else onGASFailure(res && res.message ? res.message : res);
       } catch (err) {
         onGASFailure(err);
       }
@@ -1382,7 +1408,7 @@ function setPulangMode(m) {
       tbody.innerHTML = recent.map(l => `
         <tr class="hover:bg-slate-50">
           <td class="px-6 py-3.5 font-mono text-xs font-bold text-indigo-600">${l.time}</td>
-          <td class="px-6 py-3.5 font-mono text-xs">${l.nisn}</td>
+          <td class="px-6 py-3.5 font-mono text-xs">${l.nisn || l.nip}</td>
           <td class="px-6 py-3.5 font-bold text-slate-800">${l.nama}</td>
           <td class="px-6 py-3.5 text-xs font-bold text-slate-700">${l.jenisAbsen || 'Masuk Sekolah'}</td>
           <td class="px-6 py-3.5"><span class="px-2.5 py-1 rounded-full text-xs font-bold ${getBadgeStyle(l.status)}">${l.status}</span></td>
@@ -1412,7 +1438,7 @@ function setPulangMode(m) {
       tbody.innerHTML = filtered.map(l => `
         <tr class="hover:bg-slate-50">
           <td class="px-6 py-3 font-mono text-xs">${l.timestamp}</td>
-          <td class="px-6 py-3 font-mono text-xs font-bold">${l.nisn}</td>
+          <td class="px-6 py-3 font-mono text-xs font-bold">${l.nisn || l.nip}</td>
           <td class="px-6 py-3 font-bold text-slate-800">${l.nama}</td>
           <td class="px-6 py-3 text-xs font-semibold">${l.kelas}</td>
           <td class="px-6 py-3 text-xs font-bold text-indigo-700">${l.jenisAbsen || (l.method && l.method.split('|')[1]) || 'Masuk Sekolah'}</td>
@@ -1426,6 +1452,7 @@ function setPulangMode(m) {
       if (status === 'Terlambat') return 'bg-amber-100 text-amber-700';
       if (status === 'Izin' || status === 'Sakit') return 'bg-blue-100 text-blue-700';
       if (status === 'Pulang') return 'bg-indigo-100 text-indigo-700';
+      if (status === 'Belum Pulang') return 'bg-rose-100 text-rose-700';
       return 'bg-rose-100 text-rose-700';
     }
 
@@ -1436,120 +1463,122 @@ function setPulangMode(m) {
     }
     function updateChart(h, i, a) { if (pieChartInstance) { pieChartInstance.data.datasets[0].data = [h, i, a]; pieChartInstance.update(); } }
 
+    /* ============ EKSPOR CSV ============ */
     function exportRekapCSV() {
       if (attendanceLogs.length === 0) { alert("Belum ada data absensi untuk diekspor!"); return; }
       let csv = "Timestamp,Tanggal,Jam,ID_NISN_NIP,Nama,Kelas_Jabatan,JenisAbsen,Status,Peran,Metode\n";
-      attendanceLogs.forEach(l => { csv += `"${l.timestamp}","${l.date}","${l.time}","${l.nisn}","${l.nama}","${l.kelas}","${l.jenisAbsen || (l.method && l.method.split('|')[1]) || 'Masuk Sekolah'}","${l.status}","${l.peran || 'Siswa'}","${l.method || ''}"\n`; });
+      attendanceLogs.forEach(l => { csv += `"${l.timestamp}","${l.date}","${l.time}","${l.nisn || l.nip}","${l.nama}","${l.kelas}","${l.jenisAbsen || (l.method && l.method.split('|')[1]) || 'Masuk Sekolah'}","${l.status}","${l.peran || 'Siswa'}","${l.method || ''}"\n`; });
       const blob = new Blob([csv], { type: 'text/csv' }); const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a'); a.setAttribute('href', url); a.setAttribute('download', `Rekap_Absensi_${new Date().toISOString().split('T')[0]}.csv`); a.click();
     }
 
     /* ============================
-   Daftar "Belum Absen" & Aksi
-   ============================ */
-function renderBelumAbsenTable() {
-  const tbody = document.getElementById('belum-table-body');
-  if (!tbody) return;
+       Daftar "Belum Absen" & Aksi
+       ============================ */
+    function renderBelumAbsenTable() {
+      const tbody = document.getElementById('belum-table-body');
+      if (!tbody) return;
 
-  // default date = today jika kosong
-  const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
-  const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
-  const classVal = document.getElementById('belum-class-filter')?.value || 'ALL';
-  const roleVal = document.getElementById('belum-role-filter')?.value || 'ALL';
-  const nameSearch = (document.getElementById('belum-name-search')?.value || '').trim().toLowerCase();
+      // default date = today jika kosong
+      const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
+      const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
+      const classVal = document.getElementById('belum-class-filter')?.value || 'ALL';
+      const roleVal = document.getElementById('belum-role-filter')?.value || 'ALL';
+      const nameSearch = (document.getElementById('belum-name-search')?.value || '').trim().toLowerCase();
 
-  // Set ID yang sudah absen pada tanggal+jenis
-  const presentIds = new Set();
-  (attendanceLogs || []).forEach(l => {
-    if (!l || !l.date) return;
-    if (String(l.date) !== String(dateVal)) return;
-    const lJenis = l.jenisAbsen || (l.method && String(l.method).split('|')[1]) || 'Masuk Sekolah';
-    if (String(lJenis) !== String(jenisVal)) return;
-    if (l.nisn) presentIds.add(String(l.nisn));
-    if (l.nip) presentIds.add(String(l.nip));
-  });
+      // Set ID yang sudah absen pada tanggal+jenis
+      const presentIds = new Set();
+      (attendanceLogs || []).forEach(l => {
+        if (!l || !l.date) return;
+        if (String(l.date) !== String(dateVal)) return;
+        const lJenis = l.jenisAbsen || (l.method && String(l.method).split('|')[1]) || 'Masuk Sekolah';
+        if (String(lJenis) !== String(jenisVal)) return;
+        if (l.nisn) presentIds.add(String(l.nisn));
+        if (l.nip) presentIds.add(String(l.nip));
+      });
 
-  // Kandidat
-  let candidates = [];
-  if (roleVal === 'ALL' || roleVal === 'Siswa') {
-    candidates = candidates.concat((students || []).map(s => ({ id: String(s.nisn), nama: s.nama || '', kelas: s.kelas || '', peran: 'Siswa' })));
-  }
-  if (roleVal === 'ALL' || roleVal === 'Guru') {
-    candidates = candidates.concat((teachers || []).map(g => ({ id: String(g.nip), nama: g.nama || '', kelas: g.jabatan || '', peran: 'Guru' })));
-  }
+      // Kandidat
+      let candidates = [];
+      if (roleVal === 'ALL' || roleVal === 'Siswa') {
+        candidates = candidates.concat((students || []).map(s => ({ id: String(s.nisn), nama: s.nama || '', kelas: s.kelas || '', peran: 'Siswa' })));
+      }
+      if (roleVal === 'ALL' || roleVal === 'Guru') {
+        candidates = candidates.concat((teachers || []).map(g => ({ id: String(g.nip), nama: g.nama || '', kelas: g.jabatan || '', peran: 'Guru' })));
+      }
 
-  const hasil = candidates.filter(p => {
-    if (presentIds.has(p.id)) return false;
-    if (classVal !== 'ALL' && p.kelas !== classVal) return false;
-    if (nameSearch && !String(p.nama || '').toLowerCase().startsWith(nameSearch)) return false;
-    return true;
-  });
+      const hasil = candidates.filter(p => {
+        if (presentIds.has(p.id)) return false;
+        if (classVal !== 'ALL' && p.kelas !== classVal) return false;
+        if (nameSearch && !String(p.nama || '').toLowerCase().startsWith(nameSearch)) return false;
+        return true;
+      });
 
-  if (!hasil || hasil.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">Tidak ada data — semua sudah mengisi atau filter terlalu sempit</td></tr>`;
-    return;
-  }
+      if (!hasil || hasil.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">Tidak ada data — semua sudah mengisi atau filter terlalu sempit</td></tr>`;
+        return;
+      }
 
-  tbody.innerHTML = hasil.map(p => `
-    <tr class="hover:bg-slate-50">
-      <td class="px-6 py-3 font-mono text-xs">${p.id}</td>
-      <td class="px-6 py-3 font-bold text-slate-800">${p.nama}</td>
-      <td class="px-6 py-3 text-xs">${p.kelas || '-'}</td>
-      <td class="px-6 py-3 text-xs">${p.peran}</td>
-      <td class="px-6 py-3 text-right">
-        <div class="inline-flex gap-2">
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Hadir')" class="px-2 py-1 bg-emerald-500 text-white rounded text-xs font-bold">Hadir</button>
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Alfa')" class="px-2 py-1 bg-rose-500 text-white rounded text-xs font-bold">Alfa</button>
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Sakit')" class="px-2 py-1 bg-amber-500 text-white rounded text-xs font-bold">Sakit</button>
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Izin')" class="px-2 py-1 bg-blue-500 text-white rounded text-xs font-bold">Izin</button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
-}
+      tbody.innerHTML = hasil.map(p => `
+        <tr class="hover:bg-slate-50">
+          <td class="px-6 py-3 font-mono text-xs">${p.id}</td>
+          <td class="px-6 py-3 font-bold text-slate-800">${p.nama}</td>
+          <td class="px-6 py-3 text-xs">${p.kelas || '-'}</td>
+          <td class="px-6 py-3 text-xs">${p.peran}</td>
+          <td class="px-6 py-3 text-right">
+            <div class="inline-flex gap-2">
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Hadir')" class="px-2 py-1 bg-emerald-500 text-white rounded text-xs font-bold">Hadir</button>
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Alfa')" class="px-2 py-1 bg-rose-500 text-white rounded text-xs font-bold">Alfa</button>
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Sakit')" class="px-2 py-1 bg-amber-500 text-white rounded text-xs font-bold">Sakit</button>
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Izin')" class="px-2 py-1 bg-blue-500 text-white rounded text-xs font-bold">Izin</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
 
-// Helper kecil untuk escape (prevent quotes issues in onclick)
-function escapeHtml(s) { return (s || '').toString().replace(/'/g, "\\'").replace(/"/g, '\\"'); }
+    function escapeHtml(s) { return (s || '').toString().replace(/'/g, "\\'").replace(/"/g, '\\"'); }
 
-/**
- * markTidakHadir
- * status: 'Hadir' | 'Alfa' | 'Sakit' | 'Izin'
- */
-async function markTidakHadir(id, nama, kelas, peran, status) {
-  try {
-    const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
-    const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
+    async function markTidakHadir(id, nama, kelas, peran, status) {
+      try {
+        const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
+        const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
 
-    // Anti duplikat: cek attendanceLogs
-    const already = (attendanceLogs || []).some(l => (String(l.nisn) === String(id) || String(l.nip) === String(id)) && l.date === dateVal && (l.jenisAbsen === jenisVal));
-    if (already) { showToast('Sudah terdaftar absen untuk user ini pada sesi/tanggal yang dipilih', 'error'); renderBelumAbsenTable(); return; }
+        const already = (attendanceLogs || []).some(l => (String(l.nisn) === String(id) || String(l.nip) === String(id)) && l.date === dateVal && (l.jenisAbsen === jenisVal));
+        if (already) { showToast('Sudah terdaftar absen untuk user ini pada sesi/tanggal yang dipilih', 'error'); renderBelumAbsenTable(); return; }
 
-    const now = new Date();
-    const log = {
-      timestamp: now.toLocaleString('id-ID'),
-      date: dateVal,
-      time: now.toLocaleTimeString('id-ID'),
-      nisn: id,
-      nama: nama,
-      kelas: kelas,
-      jenisAbsen: jenisVal,
-      status: status,
-      peran: peran,
-      method: `Manual|${jenisVal}`
-    };
+        const now = new Date();
+        const log = {
+          timestamp: now.toLocaleString('id-ID'),
+          date: dateVal,
+          time: now.toLocaleTimeString('id-ID'),
+          nisn: String(id).length > 6 ? id : '',
+          nip: String(id).length <= 6 ? id : '',
+          nama: nama,
+          kelas: kelas,
+          jenisAbsen: jenisVal,
+          status: status,
+          peran: peran,
+          method: `Manual|${jenisVal}`
+        };
 
-    attendanceLogs.unshift(log);
-    updateDashboardStats(); renderRecentTable(); renderRekapTable(); renderBelumAbsenTable();
-    showToast(`Tanda "${status}" disimpan untuk ${nama}`, 'success');
-    showSyncBadge('Menyimpan ke Sheet...', 'loading');
+        attendanceLogs.unshift(log);
+        updateDashboardStats(); renderRecentTable(); renderRekapTable(); renderBelumAbsenTable();
+        showToast(`Tanda "${status}" disimpan untuk ${nama}`, 'success');
+        showSyncBadge('Menyimpan ke Sheet...', 'loading');
 
-    // Kirim ke backend
-    await apiPost('saveAbsensi', log);
-    showSyncBadge('Tersimpan di Sheet', 'success');
-  } catch (err) {
-    onGASFailure(err);
-  }
-}
+        const res = await apiPost('saveAbsensi', log);
+        if (res && res.status === 'success') {
+          showSyncBadge('Tersimpan di Sheet', 'success');
+          apiCall('getInitialData', {}, onInitialDataLoaded, onGASFailure);
+        } else onGASFailure(res && res.message ? res.message : res);
+      } catch (err) {
+        onGASFailure(err);
+      }
+    }
+
+    /* ============ PROFIL & PERIODE (helper functions remain unchanged) ============ */
+    /* ... (the rest of helper functions are above; already included) ... */
+
   </script>
 </body>
 </html>
