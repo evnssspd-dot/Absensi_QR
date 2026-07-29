@@ -729,24 +729,70 @@
     function onScanFailure(error) {}
 
     function setScanMode(mode) {
-      currentScanMode = mode;
-      document.querySelectorAll('.scan-mode-btn').forEach(b => b.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-slate-200 bg-slate-50 text-slate-600");
-      const a = document.getElementById('mode-' + mode);
-      if (a) a.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
-    }
+  // Jangan ubah mode jika jenis absen Pulang (kontrol terpisah)
+  if (currentJenisAbsen === 'Pulang') {
+    // hanya izinkan 'Pulang' atau 'Belum Pulang' dari kontrol pulang
+    return;
+  }
+  currentScanMode = mode;
+  document.querySelectorAll('.scan-mode-btn').forEach(b => b.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-slate-200 bg-slate-50 text-slate-600");
+  const a = document.getElementById('mode-' + mode);
+  if (a) a.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
+}
 
-    function setJenisAbsen(jenis) {
-      currentJenisAbsen = jenis;
-      document.querySelectorAll('.jenis-absen-btn').forEach(b => b.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-slate-200 bg-white text-slate-700");
-      const a = document.getElementById('jenis-' + jenis);
-      if (a) a.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-indigo-600 bg-indigo-600 text-white shadow-xs";
-      // If Pulang selected, disable scan-mode choices (pulang has own status)
-      if (jenis === 'Pulang') {
-        document.querySelectorAll('.scan-mode-btn').forEach(b => b.setAttribute('disabled','true'));
-      } else {
-        document.querySelectorAll('.scan-mode-btn').forEach(b => b.removeAttribute('disabled'));
-      }
+function setJenisAbsen(jenis) {
+  currentJenisAbsen = jenis;
+  // Reset semua jenis-absen buttons
+  document.querySelectorAll('.jenis-absen-btn').forEach(b => b.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-slate-200 bg-white text-slate-700");
+  const a = document.getElementById('jenis-' + jenis);
+  if (a) a.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-indigo-600 bg-indigo-600 text-white shadow-xs";
+
+  // Manage status control area
+  // Temukan container orang untuk tombol status (parent dari mode-Hadir atau area known)
+  const statusContainer = document.querySelector('.scan-mode-btn') ? document.getElementById('mode-Hadir')?.parentElement : null;
+  // fallback: cari container dengan grid
+  let container = document.querySelector('.grid.grid-cols-4.gap-2');
+  if (!container && statusContainer) container = statusContainer;
+
+  if (jenis === 'Pulang') {
+    currentScanMode = 'Pulang';
+    // Sembunyikan semua scan-mode normal
+    document.querySelectorAll('.scan-mode-btn').forEach(b => b.style.display = 'none');
+
+    // Hasil : tampilkan kontrol pulang/belum pulang
+    if (container) {
+      // tandai agar kita bisa restore nanti
+      if (!container.dataset.originalHtml) container.dataset.originalHtml = container.innerHTML;
+      container.innerHTML = `
+        <button id="mode-Pulang" onclick="setPulangMode('Pulang')" class="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Pulang</button>
+        <button id="mode-BelumPulang" onclick="setPulangMode('Belum Pulang')" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold">Belum Pulang</button>
+      `;
     }
+  } else {
+    // restore normal control
+    if (container && container.dataset && container.dataset.originalHtml) {
+      container.innerHTML = container.dataset.originalHtml;
+      delete container.dataset.originalHtml;
+    } else {
+      document.querySelectorAll('.scan-mode-btn').forEach(b => { b.style.display = ''; });
+    }
+    // set default mode to Hadir
+    currentScanMode = 'Hadir';
+    // ensure UI highlight for Hadir
+    const had = document.getElementById('mode-Hadir');
+    if (had) had.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
+  }
+}
+
+// handler khusus untuk tombol pulang
+function setPulangMode(m) {
+  currentScanMode = m === 'Belum Pulang' ? 'Belum Pulang' : 'Pulang';
+  // update visual (highlight)
+  const pul = document.getElementById('mode-Pulang');
+  const bp = document.getElementById('mode-BelumPulang');
+  if (pul) pul.className = currentScanMode === 'Pulang' ? 'px-3 py-2 bg-indigo-700 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold';
+  if (bp) bp.className = currentScanMode === 'Belum Pulang' ? 'px-3 py-2 bg-rose-500 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold';
+}
 
     function handleManualInput(e) {
       e.preventDefault();
