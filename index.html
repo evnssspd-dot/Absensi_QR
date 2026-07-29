@@ -492,7 +492,7 @@
   <script>
     // ========== CONFIG ==========
     // GANTI dengan Web App URL (setelah Anda deploy Code.gs sebagai Web App)
-    const API_URL = 'PASTE_YOUR_WEBAPP_URL_HERE';
+    const API_URL = 'https://script.google.com/macros/s/AKfycbwfAsoOabMo7r8_DJhPaDbRztXrPlxp_FQfXmPvUThJ91rr85LjL66XGFTNJew8RF027g/exec';
 
     // ========== STATE ==========
     let students = [], teachers = [], attendanceLogs = [], classList = [], academicYearList = [];
@@ -543,7 +543,7 @@
     }
 
     async function apiPost(action, data) {
-      if (!API_URL || API_URL.indexOf('PASTE_YOUR_WEBAPP_URL_HERE') !== -1) {
+      if (!API_URL || API_URL.indexOf('https://script.google.com/macros/s/AKfycbwfAsoOabMo7r8_DJhPaDbRztXrPlxp_FQfXmPvUThJ91rr85LjL66XGFTNJew8RF027g/exec') !== -1) {
         throw new Error('API_URL belum diisi. Ganti API_URL dengan WebApp URL Anda.');
       }
       const params = new URLSearchParams();
