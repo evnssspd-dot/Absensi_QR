@@ -604,15 +604,17 @@
           const copy = Object.assign({}, l);
           if (copy.method && String(copy.method).indexOf('|') !== -1) {
             const parts = String(copy.method).split('|');
-            // method stored as "origMethod|JenisAbsen"
             copy.method = parts[0];
-            copy.jenisAbsen = parts[1] || '';
+            // leave jenisAbsen to be normalized by normalizeAttendanceLogs()
+            copy.jenisAbsen = parts[1] || copy.jenisAbsen || '';
           } else {
-            // fallback: try to infer from columns (not available in generic sheet), set default
-            copy.jenisAbsen = copy.jenisAbsen || 'Masuk Sekolah';
+            copy.jenisAbsen = copy.jenisAbsen || '';
           }
           return copy;
         });
+
+        // Normalisasi supaya perbandingan nanti konsisten (tanggal format, id, jenis)
+        normalizeAttendanceLogs();
 
         applySchoolProfileUI(); updateAllDropdowns(); renderKelasTable(); renderTahunTable();
         updateDashboardStats(); renderRecentTable(); renderSiswaTable(); renderGuruTable(); renderRekapTable();
@@ -1448,108 +1450,212 @@ function setPulangMode(m) {
    Daftar "Belum Absen" & Aksi
    ============================ */
 function renderBelumAbsenTable() {
-  const tbody = document.getElementById('belum-table-body');
-  if (!tbody) return;
+      const tbody = document.getElementById('belum-table-body');
+      if (!tbody) return;
 
-  // default date = today jika kosong
-  const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
-  const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
-  const classVal = document.getElementById('belum-class-filter')?.value || 'ALL';
-  const roleVal = document.getElementById('belum-role-filter')?.value || 'ALL';
-  const nameSearch = (document.getElementById('belum-name-search')?.value || '').trim().toLowerCase();
+      // default date = today jika kosong
+      const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
+      const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
+      const classVal = document.getElementById('belum-class-filter')?.value || 'ALL';
+      const roleVal = document.getElementById('belum-role-filter')?.value || 'ALL';
+      const nameSearch = (document.getElementById('belum-name-search')?.value || '').trim().toLowerCase();
 
-  // Set ID yang sudah absen pada tanggal+jenis
-  const presentIds = new Set();
-  (attendanceLogs || []).forEach(l => {
-    if (!l || !l.date) return;
-    if (String(l.date) !== String(dateVal)) return;
-    const lJenis = l.jenisAbsen || (l.method && String(l.method).split('|')[1]) || 'Masuk Sekolah';
-    if (String(lJenis) !== String(jenisVal)) return;
-    if (l.nisn) presentIds.add(String(l.nisn));
-    if (l.nip) presentIds.add(String(l.nip));
-  });
+      // Set ID yang sudah absen pada tanggal+jenis — gunakan helper yang robust
+      const presentIds = new Set();
+      (attendanceLogs || []).forEach(l => {
+        const lDate = getLogDate(l);
+        if (!lDate) return; // jika tidak bisa diparse, abaikan (lebih aman)
+        if (String(lDate) !== String(dateVal)) return;
+        const lJenis = (getLogJenis(l) || 'Masuk Sekolah');
+        if (String(lJenis).trim() !== String(jenisVal).trim()) return;
+        const id = getLogId(l);
+        if (id) presentIds.add(String(id));
+      });
 
-  // Kandidat
-  let candidates = [];
-  if (roleVal === 'ALL' || roleVal === 'Siswa') {
-    candidates = candidates.concat((students || []).map(s => ({ id: String(s.nisn), nama: s.nama || '', kelas: s.kelas || '', peran: 'Siswa' })));
-  }
-  if (roleVal === 'ALL' || roleVal === 'Guru') {
-    candidates = candidates.concat((teachers || []).map(g => ({ id: String(g.nip), nama: g.nama || '', kelas: g.jabatan || '', peran: 'Guru' })));
-  }
+      // Kandidat (gabungan siswa + guru sesuai filter role)
+      let candidates = [];
+      if (roleVal === 'ALL' || roleVal === 'Siswa') {
+        candidates = candidates.concat((students || []).map(s => ({ id: String(s.nisn || ''), nama: s.nama || '', kelas: s.kelas || '', peran: 'Siswa' })));
+      }
+      if (roleVal === 'ALL' || roleVal === 'Guru') {
+        candidates = candidates.concat((teachers || []).map(g => ({ id: String(g.nip || ''), nama: g.nama || '', kelas: g.jabatan || '', peran: 'Guru' })));
+      }
 
-  const hasil = candidates.filter(p => {
-    if (presentIds.has(p.id)) return false;
-    if (classVal !== 'ALL' && p.kelas !== classVal) return false;
-    if (nameSearch && !String(p.nama || '').toLowerCase().startsWith(nameSearch)) return false;
-    return true;
-  });
+      const hasil = candidates.filter(p => {
+        if (!p.id) return false; // abaikan entri tanpa id
+        if (presentIds.has(String(p.id))) return false;
+        if (classVal !== 'ALL' && p.kelas !== classVal) return false;
+        if (nameSearch && !String(p.nama || '').toLowerCase().startsWith(nameSearch)) return false;
+        return true;
+      });
 
-  if (!hasil || hasil.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">Tidak ada data — semua sudah mengisi atau filter terlalu sempit</td></tr>`;
-    return;
-  }
+      if (!hasil || hasil.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">Tidak ada data — semua sudah mengisi atau filter terlalu sempit</td></tr>`;
+        return;
+      }
 
-  tbody.innerHTML = hasil.map(p => `
-    <tr class="hover:bg-slate-50">
-      <td class="px-6 py-3 font-mono text-xs">${p.id}</td>
-      <td class="px-6 py-3 font-bold text-slate-800">${p.nama}</td>
-      <td class="px-6 py-3 text-xs">${p.kelas || '-'}</td>
-      <td class="px-6 py-3 text-xs">${p.peran}</td>
-      <td class="px-6 py-3 text-right">
-        <div class="inline-flex gap-2">
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Hadir')" class="px-2 py-1 bg-emerald-500 text-white rounded text-xs font-bold">Hadir</button>
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Alfa')" class="px-2 py-1 bg-rose-500 text-white rounded text-xs font-bold">Alfa</button>
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Sakit')" class="px-2 py-1 bg-amber-500 text-white rounded text-xs font-bold">Sakit</button>
-          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Izin')" class="px-2 py-1 bg-blue-500 text-white rounded text-xs font-bold">Izin</button>
-        </div>
-      </td>
-    </tr>
-  `).join('');
-}
+      tbody.innerHTML = hasil.map(p => `
+        <tr class="hover:bg-slate-50">
+          <td class="px-6 py-3 font-mono text-xs">${p.id}</td>
+          <td class="px-6 py-3 font-bold text-slate-800">${escapeHtml(p.nama)}</td>
+          <td class="px-6 py-3 text-xs">${escapeHtml(p.kelas || '-')}</td>
+          <td class="px-6 py-3 text-xs">${p.peran}</td>
+          <td class="px-6 py-3 text-right">
+            <div class="inline-flex gap-2">
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Hadir')" class="px-2 py-1 bg-emerald-500 text-white rounded text-xs font-bold">Hadir</button>
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Alfa')" class="px-2 py-1 bg-rose-500 text-white rounded text-xs font-bold">Alfa</button>
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Sakit')" class="px-2 py-1 bg-amber-500 text-white rounded text-xs font-bold">Sakit</button>
+              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Izin')" class="px-2 py-1 bg-blue-500 text-white rounded text-xs font-bold">Izin</button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
 
 // Helper kecil untuk escape (prevent quotes issues in onclick)
-function escapeHtml(s) { return (s || '').toString().replace(/'/g, "\\'").replace(/"/g, '\\"'); }
+    function escapeHtml(s) { return (s || '').toString().replace(/'/g, "\\'").replace(/"/g, '\\"'); }
 
-/**
- * markTidakHadir
- * status: 'Hadir' | 'Alfa' | 'Sakit' | 'Izin'
- */
-async function markTidakHadir(id, nama, kelas, peran, status) {
-  try {
-    const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
-    const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
+    /**
+     * markTidakHadir
+     * status: 'Hadir' | 'Alfa' | 'Sakit' | 'Izin'
+     */
+    async function markTidakHadir(id, nama, kelas, peran, status) {
+      try {
+        const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
+        const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
 
-    // Anti duplikat: cek attendanceLogs
-    const already = (attendanceLogs || []).some(l => (String(l.nisn) === String(id) || String(l.nip) === String(id)) && l.date === dateVal && (l.jenisAbsen === jenisVal));
-    if (already) { showToast('Sudah terdaftar absen untuk user ini pada sesi/tanggal yang dipilih', 'error'); renderBelumAbsenTable(); return; }
+        // Anti duplikat: cek attendanceLogs (gunakan getLogId & getLogDate & getLogJenis)
+        const already = (attendanceLogs || []).some(l => {
+          const lid = getLogId(l);
+          const lDate = getLogDate(l);
+          const lJenis = getLogJenis(l);
+          return lid && String(lid) === String(id) && lDate === dateVal && String(lJenis).trim() === String(jenisVal).trim();
+        });
+        if (already) { showToast('Sudah terdaftar absen untuk user ini pada sesi/tanggal yang dipilih', 'error'); renderBelumAbsenTable(); return; }
 
-    const now = new Date();
-    const log = {
-      timestamp: now.toLocaleString('id-ID'),
-      date: dateVal,
-      time: now.toLocaleTimeString('id-ID'),
-      nisn: id,
-      nama: nama,
-      kelas: kelas,
-      jenisAbsen: jenisVal,
-      status: status,
-      peran: peran,
-      method: `Manual|${jenisVal}`
-    };
+        const now = new Date();
+        const log = {
+          timestamp: now.toLocaleString('id-ID'),
+          date: dateVal,
+          time: now.toLocaleTimeString('id-ID'),
+          nisn: id, // kita simpan ke field nisn agar normalisasi bekerja (id bisa juga NIP)
+          nama: nama,
+          kelas: kelas,
+          jenisAbsen: jenisVal,
+          status: status,
+          peran: peran,
+          method: `Manual|${jenisVal}`
+        };
 
-    attendanceLogs.unshift(log);
-    updateDashboardStats(); renderRecentTable(); renderRekapTable(); renderBelumAbsenTable();
-    showToast(`Tanda "${status}" disimpan untuk ${nama}`, 'success');
-    showSyncBadge('Menyimpan ke Sheet...', 'loading');
+        // push ke local logs + normalisasi ringan
+        log._id = String(id);
+        attendanceLogs.unshift(log);
+        // pastikan normalized (date already set)
+        updateDashboardStats(); renderRecentTable(); renderRekapTable(); renderBelumAbsenTable();
+        showToast(`Tanda "${status}" disimpan untuk ${nama}`, 'success');
+        showSyncBadge('Menyimpan ke Sheet...', 'loading');
 
-    // Kirim ke backend
-    await apiPost('saveAbsensi', log);
-    showSyncBadge('Tersimpan di Sheet', 'success');
-  } catch (err) {
-    onGASFailure(err);
-  }
-}
+        // Kirim ke backend
+        await apiPost('saveAbsensi', log);
+        showSyncBadge('Tersimpan di Sheet', 'success');
+      } catch (err) {
+        onGASFailure(err);
+      }
+    }
+
+// Mengembalikan tanggal dalam format YYYY-MM-DD bila memungkinkan, atau '' jika gagal
+    function getLogDate(log) {
+      if (!log) return '';
+      // 1) jika sudah ada date dengan format YYYY-MM-DD
+      if (log.date && /^\d{4}-\d{2}-\d{2}$/.test(String(log.date).trim())) return String(log.date).trim();
+
+      // 2) coba parse dari timestamp (umumnya ISO atau string yang dapat diparse)
+      if (log.timestamp) {
+        const d = new Date(log.timestamp);
+        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+        // kadang timestamp dari spreadsheet adalah 'dd/mm/yyyy hh:mm' -> coba ubah
+        const tryTs = parseNonIsoDateString(log.timestamp);
+        if (tryTs) return tryTs.toISOString().split('T')[0];
+      }
+
+      // 3) coba parse dari field date yang bukan ISO (mis. '29/07/2026' atau '29-07-2026')
+      if (log.date) {
+        const d2 = parseNonIsoDateString(log.date);
+        if (d2) return d2.toISOString().split('T')[0];
+      }
+
+      // 4) fallback kosong (lebih aman: jangan anggap hari ini, agar tidak mengacaukan data)
+      return '';
+    }
+function parseNonIsoDateString(s) {
+      if (!s) return null;
+      s = String(s).trim();
+      // dd/mm/yyyy or dd-mm-yyyy
+      let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+.*)?$/);
+      if (m) {
+        const day = parseInt(m[1],10), month = parseInt(m[2],10)-1, year = parseInt(m[3],10);
+        const d = new Date(year, month, day);
+        if (!isNaN(d.getTime())) return d;
+      }
+      // yyyy-mm-dd or yyyy/mm/dd
+      m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+      if (m) {
+        const year = parseInt(m[1],10), month = parseInt(m[2],10)-1, day = parseInt(m[3],10);
+        const d = new Date(year, month, day);
+        if (!isNaN(d.getTime())) return d;
+      }
+      // terakhir coba Date.parse
+      const d3 = new Date(s);
+      if (!isNaN(d3.getTime())) return d3;
+      return null;
+    }
+// Ambil id dari log (bisa nisn, nip, id)
+    function getLogId(log) {
+      if (!log) return '';
+      if (log.nisn && String(log.nisn).trim() !== '') return String(log.nisn).trim();
+      if (log.nip && String(log.nip).trim() !== '') return String(log.nip).trim();
+      if (log.id && String(log.id).trim() !== '') return String(log.id).trim();
+      return '';
+    }
+
+// Ambil jenis absen dari log (dari properti jenisAbsen atau method "xxx|Jenis")
+    function getLogJenis(log) {
+      if (!log) return 'Masuk Sekolah';
+      if (log.jenisAbsen && String(log.jenisAbsen).trim() !== '') return String(log.jenisAbsen).trim();
+      if (log.method && String(log.method).indexOf('|') !== -1) {
+        const parts = String(log.method).split('|');
+        return (parts[1] || 'Masuk Sekolah').trim();
+      }
+      if (log.method && String(log.method).trim() !== '') {
+        return String(log.method).trim();
+      }
+      return 'Masuk Sekolah';
+    }
+// Normalisasi seluruh attendanceLogs yang diterima dari backend
+    function normalizeAttendanceLogs() {
+      attendanceLogs = (attendanceLogs || []).map(orig => {
+        const l = Object.assign({}, orig);
+        // pastikan id dalam bentuk string konsisten
+        const id = getLogId(l);
+        if (!l.nisn && l.nip) l.nisn = String(l.nip);
+        if (!l.nisn && l.id) l.nisn = String(l.id);
+        if (!l.nisn && id) l.nisn = id;
+
+        // normalisasi date -> YYYY-MM-DD (jika tidak bisa di-parse, kosongkan agar tidak keliru)
+        l.date = getLogDate(l);
+
+        // normalisasi jenisAbsen
+        l.jenisAbsen = getLogJenis(l);
+
+        // normalisasi status
+        l.status = (l.status && String(l.status).trim()) || 'Hadir';
+
+        // simpan juga _id supaya mudah digunakan
+        l._id = String(getLogId(l) || '');
+
+        return l;
+      });
+    }
   </script>
 </body>
 </html>
