@@ -1397,6 +1397,113 @@
       const blob = new Blob([csv], { type: 'text/csv' }); const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a'); a.setAttribute('href', url); a.setAttribute('download', `Rekap_Absensi_${new Date().toISOString().split('T')[0]}.csv`); a.click();
     }
+
+    /* ============================
+   Daftar "Belum Absen" & Aksi
+   ============================ */
+function renderBelumAbsenTable() {
+  const tbody = document.getElementById('belum-table-body');
+  if (!tbody) return;
+
+  // default date = today jika kosong
+  const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
+  const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
+  const classVal = document.getElementById('belum-class-filter')?.value || 'ALL';
+  const roleVal = document.getElementById('belum-role-filter')?.value || 'ALL';
+  const nameSearch = (document.getElementById('belum-name-search')?.value || '').trim().toLowerCase();
+
+  // Set ID yang sudah absen pada tanggal+jenis
+  const presentIds = new Set();
+  (attendanceLogs || []).forEach(l => {
+    if (!l || !l.date) return;
+    if (String(l.date) !== String(dateVal)) return;
+    const lJenis = l.jenisAbsen || (l.method && String(l.method).split('|')[1]) || 'Masuk Sekolah';
+    if (String(lJenis) !== String(jenisVal)) return;
+    if (l.nisn) presentIds.add(String(l.nisn));
+    if (l.nip) presentIds.add(String(l.nip));
+  });
+
+  // Kandidat
+  let candidates = [];
+  if (roleVal === 'ALL' || roleVal === 'Siswa') {
+    candidates = candidates.concat((students || []).map(s => ({ id: String(s.nisn), nama: s.nama || '', kelas: s.kelas || '', peran: 'Siswa' })));
+  }
+  if (roleVal === 'ALL' || roleVal === 'Guru') {
+    candidates = candidates.concat((teachers || []).map(g => ({ id: String(g.nip), nama: g.nama || '', kelas: g.jabatan || '', peran: 'Guru' })));
+  }
+
+  const hasil = candidates.filter(p => {
+    if (presentIds.has(p.id)) return false;
+    if (classVal !== 'ALL' && p.kelas !== classVal) return false;
+    if (nameSearch && !String(p.nama || '').toLowerCase().startsWith(nameSearch)) return false;
+    return true;
+  });
+
+  if (!hasil || hasil.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">Tidak ada data — semua sudah mengisi atau filter terlalu sempit</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = hasil.map(p => `
+    <tr class="hover:bg-slate-50">
+      <td class="px-6 py-3 font-mono text-xs">${p.id}</td>
+      <td class="px-6 py-3 font-bold text-slate-800">${p.nama}</td>
+      <td class="px-6 py-3 text-xs">${p.kelas || '-'}</td>
+      <td class="px-6 py-3 text-xs">${p.peran}</td>
+      <td class="px-6 py-3 text-right">
+        <div class="inline-flex gap-2">
+          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Hadir')" class="px-2 py-1 bg-emerald-500 text-white rounded text-xs font-bold">Hadir</button>
+          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Alfa')" class="px-2 py-1 bg-rose-500 text-white rounded text-xs font-bold">Alfa</button>
+          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Sakit')" class="px-2 py-1 bg-amber-500 text-white rounded text-xs font-bold">Sakit</button>
+          <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Izin')" class="px-2 py-1 bg-blue-500 text-white rounded text-xs font-bold">Izin</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Helper kecil untuk escape (prevent quotes issues in onclick)
+function escapeHtml(s) { return (s || '').toString().replace(/'/g, "\\'").replace(/"/g, '\\"'); }
+
+/**
+ * markTidakHadir
+ * status: 'Hadir' | 'Alfa' | 'Sakit' | 'Izin'
+ */
+async function markTidakHadir(id, nama, kelas, peran, status) {
+  try {
+    const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
+    const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
+
+    // Anti duplikat: cek attendanceLogs
+    const already = (attendanceLogs || []).some(l => (String(l.nisn) === String(id) || String(l.nip) === String(id)) && l.date === dateVal && (l.jenisAbsen === jenisVal));
+    if (already) { showToast('Sudah terdaftar absen untuk user ini pada sesi/tanggal yang dipilih', 'error'); renderBelumAbsenTable(); return; }
+
+    const now = new Date();
+    const log = {
+      timestamp: now.toLocaleString('id-ID'),
+      date: dateVal,
+      time: now.toLocaleTimeString('id-ID'),
+      nisn: id,
+      nama: nama,
+      kelas: kelas,
+      jenisAbsen: jenisVal,
+      status: status,
+      peran: peran,
+      method: `Manual|${jenisVal}`
+    };
+
+    attendanceLogs.unshift(log);
+    updateDashboardStats(); renderRecentTable(); renderRekapTable(); renderBelumAbsenTable();
+    showToast(`Tanda "${status}" disimpan untuk ${nama}`, 'success');
+    showSyncBadge('Menyimpan ke Sheet...', 'loading');
+
+    // Kirim ke backend
+    await apiPost('saveAbsensi', log);
+    showSyncBadge('Tersimpan di Sheet', 'success');
+  } catch (err) {
+    onGASFailure(err);
+  }
+}
   </script>
 </body>
 </html>
