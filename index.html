@@ -536,6 +536,39 @@
       renderNavMenu(); updateLiveClock(); setInterval(updateLiveClock, 1000); initApp();
     });
 
+    /* HELPER: Formatting date string ke YYYY-MM-DD secara konsisten */
+    function formatDateStandard(dateInput) {
+      if (!dateInput) return new Date().toISOString().split('T')[0];
+      const str = String(dateInput).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      }
+      return str;
+    }
+
+    /* HELPER: Normalisasi Data Absensi dari Google Sheets saat load/refresh */
+    function normalizeAttendanceLogs() {
+      attendanceLogs = attendanceLogs.map(l => {
+        const copy = Object.assign({}, l);
+        copy.date = formatDateStandard(copy.date);
+        
+        // Ekstrak jenisAbsen jika tersimpan di method (format "Method|JenisAbsen")
+        if (copy.method && String(copy.method).indexOf('|') !== -1) {
+          const parts = String(copy.method).split('|');
+          copy.jenisAbsen = parts[1] || copy.jenisAbsen || 'Masuk Sekolah';
+          copy.method = parts[0];
+        } else if (!copy.jenisAbsen) {
+          copy.jenisAbsen = 'Masuk Sekolah';
+        }
+        return copy;
+      });
+    }
+
     /* ============ JSONP API CALL ============ */
     function apiCall(action, data, onSuccess, onError) {
       if (!API_URL || API_URL.indexOf('GANTI_DENGAN') !== -1) {
@@ -570,7 +603,7 @@
 
       const resp = await fetch(API_URL, {
         method: 'POST',
-        body: params // application/x-www-form-urlencoded -> simple request, avoids preflight
+        body: params
       });
 
       if (!resp.ok) {
@@ -599,26 +632,12 @@
         if (data.schoolProfile) schoolProfile = Object.assign(schoolProfile, data.schoolProfile);
         if (data.academicYear && data.academicYear.tahunPelajaran) academicYear = data.academicYear;
 
-        // parse method to extract jenisAbsen if present (we saved as "QR Code|Masuk Sekolah")
-        attendanceLogs = attendanceLogs.map(l => {
-          const copy = Object.assign({}, l);
-          if (copy.method && String(copy.method).indexOf('|') !== -1) {
-            const parts = String(copy.method).split('|');
-            copy.method = parts[0];
-            // leave jenisAbsen to be normalized by normalizeAttendanceLogs()
-            copy.jenisAbsen = parts[1] || copy.jenisAbsen || '';
-          } else {
-            copy.jenisAbsen = copy.jenisAbsen || '';
-          }
-          return copy;
-        });
-
-        // Normalisasi supaya perbandingan nanti konsisten (tanggal format, id, jenis)
+        // Normalisasi data tanggal dan jenis absensi
         normalizeAttendanceLogs();
 
         applySchoolProfileUI(); updateAllDropdowns(); renderKelasTable(); renderTahunTable();
         updateDashboardStats(); renderRecentTable(); renderSiswaTable(); renderGuruTable(); renderRekapTable();
-        renderKtsCards(); initChart();
+        renderBelumAbsenTable(); renderKtsCards(); initChart();
         showSyncBadge("Terkoneksi ke Sheet", "success");
       }
     }
@@ -731,70 +750,53 @@
     function onScanFailure(error) {}
 
     function setScanMode(mode) {
-  // Jangan ubah mode jika jenis absen Pulang (kontrol terpisah)
-  if (currentJenisAbsen === 'Pulang') {
-    // hanya izinkan 'Pulang' atau 'Belum Pulang' dari kontrol pulang
-    return;
-  }
-  currentScanMode = mode;
-  document.querySelectorAll('.scan-mode-btn').forEach(b => b.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-slate-200 bg-slate-50 text-slate-600");
-  const a = document.getElementById('mode-' + mode);
-  if (a) a.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
-}
-
-function setJenisAbsen(jenis) {
-  currentJenisAbsen = jenis;
-  // Reset semua jenis-absen buttons
-  document.querySelectorAll('.jenis-absen-btn').forEach(b => b.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-slate-200 bg-white text-slate-700");
-  const a = document.getElementById('jenis-' + jenis);
-  if (a) a.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-indigo-600 bg-indigo-600 text-white shadow-xs";
-
-  // Manage status control area
-  // Temukan container orang untuk tombol status (parent dari mode-Hadir atau area known)
-  const statusContainer = document.querySelector('.scan-mode-btn') ? document.getElementById('mode-Hadir')?.parentElement : null;
-  // fallback: cari container dengan grid
-  let container = document.querySelector('.grid.grid-cols-4.gap-2');
-  if (!container && statusContainer) container = statusContainer;
-
-  if (jenis === 'Pulang') {
-    currentScanMode = 'Pulang';
-    // Sembunyikan semua scan-mode normal
-    document.querySelectorAll('.scan-mode-btn').forEach(b => b.style.display = 'none');
-
-    // Hasil : tampilkan kontrol pulang/belum pulang
-    if (container) {
-      // tandai agar kita bisa restore nanti
-      if (!container.dataset.originalHtml) container.dataset.originalHtml = container.innerHTML;
-      container.innerHTML = `
-        <button id="mode-Pulang" onclick="setPulangMode('Pulang')" class="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Pulang</button>
-        <button id="mode-BelumPulang" onclick="setPulangMode('Belum Pulang')" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold">Belum Pulang</button>
-      `;
+      if (currentJenisAbsen === 'Pulang') return;
+      currentScanMode = mode;
+      document.querySelectorAll('.scan-mode-btn').forEach(b => b.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-slate-200 bg-slate-50 text-slate-600");
+      const a = document.getElementById('mode-' + mode);
+      if (a) a.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
     }
-  } else {
-    // restore normal control
-    if (container && container.dataset && container.dataset.originalHtml) {
-      container.innerHTML = container.dataset.originalHtml;
-      delete container.dataset.originalHtml;
-    } else {
-      document.querySelectorAll('.scan-mode-btn').forEach(b => { b.style.display = ''; });
-    }
-    // set default mode to Hadir
-    currentScanMode = 'Hadir';
-    // ensure UI highlight for Hadir
-    const had = document.getElementById('mode-Hadir');
-    if (had) had.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
-  }
-}
 
-// handler khusus untuk tombol pulang
-function setPulangMode(m) {
-  currentScanMode = m === 'Belum Pulang' ? 'Belum Pulang' : 'Pulang';
-  // update visual (highlight)
-  const pul = document.getElementById('mode-Pulang');
-  const bp = document.getElementById('mode-BelumPulang');
-  if (pul) pul.className = currentScanMode === 'Pulang' ? 'px-3 py-2 bg-indigo-700 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold';
-  if (bp) bp.className = currentScanMode === 'Belum Pulang' ? 'px-3 py-2 bg-rose-500 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold';
-}
+    function setJenisAbsen(jenis) {
+      currentJenisAbsen = jenis;
+      document.querySelectorAll('.jenis-absen-btn').forEach(b => b.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-slate-200 bg-white text-slate-700");
+      const a = document.getElementById('jenis-' + jenis);
+      if (a) a.className = "jenis-absen-btn py-2 px-2 rounded-xl border text-xs font-bold text-center border-indigo-600 bg-indigo-600 text-white shadow-xs";
+
+      const statusContainer = document.querySelector('.scan-mode-btn') ? document.getElementById('mode-Hadir')?.parentElement : null;
+      let container = document.querySelector('.grid.grid-cols-4.gap-2');
+      if (!container && statusContainer) container = statusContainer;
+
+      if (jenis === 'Pulang') {
+        currentScanMode = 'Pulang';
+        document.querySelectorAll('.scan-mode-btn').forEach(b => b.style.display = 'none');
+        if (container) {
+          if (!container.dataset.originalHtml) container.dataset.originalHtml = container.innerHTML;
+          container.innerHTML = `
+            <button id="mode-Pulang" onclick="setPulangMode('Pulang')" class="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold">Pulang</button>
+            <button id="mode-BelumPulang" onclick="setPulangMode('Belum Pulang')" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold">Belum Pulang</button>
+          `;
+        }
+      } else {
+        if (container && container.dataset && container.dataset.originalHtml) {
+          container.innerHTML = container.dataset.originalHtml;
+          delete container.dataset.originalHtml;
+        } else {
+          document.querySelectorAll('.scan-mode-btn').forEach(b => { b.style.display = ''; });
+        }
+        currentScanMode = 'Hadir';
+        const had = document.getElementById('mode-Hadir');
+        if (had) had.className = "scan-mode-btn py-2 px-2 rounded-xl border-2 text-xs font-bold text-center border-indigo-500 bg-indigo-50 text-indigo-700";
+      }
+    }
+
+    function setPulangMode(m) {
+      currentScanMode = m === 'Belum Pulang' ? 'Belum Pulang' : 'Pulang';
+      const pul = document.getElementById('mode-Pulang');
+      const bp = document.getElementById('mode-BelumPulang');
+      if (pul) pul.className = currentScanMode === 'Pulang' ? 'px-3 py-2 bg-indigo-700 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold';
+      if (bp) bp.className = currentScanMode === 'Belum Pulang' ? 'px-3 py-2 bg-rose-500 text-white rounded-xl text-xs font-bold' : 'px-3 py-2 bg-slate-50 border rounded-xl text-xs font-bold';
+    }
 
     function handleManualInput(e) {
       e.preventDefault();
@@ -804,10 +806,8 @@ function setPulangMode(m) {
 
     /* ============ PROSES ABSENSI & ANTI-DUPLIKAT ============ */
     function processAttendanceScan(idCode, method) {
-      const now = new Date();
-      const todayStr = now.toISOString().split('T')[0];
+      const todayStr = formatDateStandard(new Date());
 
-      // Cari di data Siswa atau Guru
       const student = students.find(s => String(s.nisn) === String(idCode));
       const teacher = teachers.find(g => String(g.nip) === String(idCode));
 
@@ -824,7 +824,7 @@ function setPulangMode(m) {
       // VALIDASI ANTI-DUPLIKAT SCAN PER HARI & SESI
       const isAlreadyScanned = attendanceLogs.some(log => 
         String(log.nisn) === String(idCode) && 
-        log.date === todayStr && 
+        formatDateStandard(log.date) === todayStr && 
         log.jenisAbsen === currentJenisAbsen
       );
 
@@ -834,15 +834,13 @@ function setPulangMode(m) {
         return;
       }
 
-      // For non-Pulang auto status Hadir; for Pulang status Pulang
-      const statusToSave = (currentJenisAbsen === 'Pulang') ? 'Pulang' : 'Hadir';
-
+      const statusToSave = (currentJenisAbsen === 'Pulang') ? 'Pulang' : currentScanMode;
       const nowLocal = new Date();
       const logEntry = {
         timestamp: nowLocal.toLocaleString('id-ID'),
         date: todayStr,
         time: nowLocal.toLocaleTimeString('id-ID'),
-        nisn: idCode,
+        nisn: String(idCode),
         nama: personName,
         kelas: personClass,
         jenisAbsen: currentJenisAbsen,
@@ -851,7 +849,6 @@ function setPulangMode(m) {
         method: method
       };
 
-      // Store method with jenisAbsen so backend still saves jenis info into sheet (in 'method' column)
       const methodForBackend = `${method}|${currentJenisAbsen}`;
 
       attendanceLogs.unshift(Object.assign({}, logEntry, { method: methodForBackend }));
@@ -1027,7 +1024,6 @@ function setPulangMode(m) {
       showSyncBadge("Menyimpan Siswa...", "loading");
 
       try {
-        // If foto is a data URL, send as fotoBase64 (backend will upload)
         if (siswaObj.fotoUrl && String(siswaObj.fotoUrl).startsWith('data:')) {
           siswaObj.fotoBase64 = siswaObj.fotoUrl;
           siswaObj.fotoUrl = '';
@@ -1233,15 +1229,12 @@ function setPulangMode(m) {
       showSyncBadge("Menyimpan Profil...", "loading");
 
       try {
-        // jika logo adalah data URL, upload terlebih dahulu
         if (schoolProfile.logoUrl && String(schoolProfile.logoUrl).startsWith('data:')) {
           const fileName = `LOGO_${Date.now()}.png`;
           try {
             const upResp = await apiPost('uploadFoto', { fotoBase64: schoolProfile.logoUrl, fileName: fileName });
             if (upResp && upResp.status === 'success' && upResp.fotoUrl) {
               schoolProfile.logoUrl = upResp.fotoUrl;
-            } else {
-              console.warn('Upload logo gagal', upResp);
             }
           } catch (err) {
             console.warn('Upload logo error', err);
@@ -1364,8 +1357,9 @@ function setPulangMode(m) {
 
     /* ============ STATS & REKAP ============ */
     function updateDashboardStats() {
-      const total = students.length + teachers.length; const today = new Date().toISOString().split('T')[0];
-      const logsToday = attendanceLogs.filter(l => l.date === today && (l.jenisAbsen === 'Masuk Sekolah' || (l.method && String(l.method).indexOf('|Masuk Sekolah')>-1)));
+      const total = students.length + teachers.length;
+      const today = formatDateStandard(new Date());
+      const logsToday = attendanceLogs.filter(l => formatDateStandard(l.date) === today && (l.jenisAbsen === 'Masuk Sekolah' || (l.method && String(l.method).indexOf('|Masuk Sekolah') > -1)));
       const hadirCount = logsToday.filter(l => l.status === 'Hadir').length;
       const izinCount = logsToday.filter(l => l.status === 'Izin' || l.status === 'Sakit' || l.status === 'Terlambat').length;
       const alpaCount = Math.max(0, total - (hadirCount + izinCount));
@@ -1402,259 +1396,140 @@ function setPulangMode(m) {
 
       const filtered = attendanceLogs.filter(l => {
         let md = true;
-        if (dateVal) md = l.date === dateVal;
-        if (dateText) md = md && (String(l.date).indexOf(dateText) !== -1 || String(l.timestamp).indexOf(dateText) !== -1);
-        const mj = jenisVal === 'ALL' || l.jenisAbsen === jenisVal || (l.method && String(l.method).indexOf('|' + jenisVal) !== -1);
-        const mc = classVal === 'ALL' || l.kelas === classVal;
-        const mn = !nameSearch || (String(l.nama || '').toLowerCase().startsWith(nameSearch));
+        const logDateStd = formatDateStandard(l.date);
+        if (dateVal) md = logDateStd === dateVal;
+        if (dateText) md = md && (logDateStd.indexOf(dateText) !== -1);
+        const mj = (jenisVal === 'ALL' || l.jenisAbsen === jenisVal);
+        const mc = (classVal === 'ALL' || l.kelas === classVal);
+        const mn = (!nameSearch || l.nama.toLowerCase().startsWith(nameSearch));
         return md && mj && mc && mn;
       });
 
-      if (filtered.length === 0) { tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400">Tidak ada riwayat absensi ditemukan</td></tr>`; return; }
+      if (filtered.length === 0) { tbody.innerHTML = `<tr><td colspan="7" class="p-6 text-center text-slate-400">Tidak ada log rekap absensi ditemukan</td></tr>`; return; }
       tbody.innerHTML = filtered.map(l => `
         <tr class="hover:bg-slate-50">
-          <td class="px-6 py-3 font-mono text-xs">${l.timestamp}</td>
-          <td class="px-6 py-3 font-mono text-xs font-bold">${l.nisn}</td>
-          <td class="px-6 py-3 font-bold text-slate-800">${l.nama}</td>
-          <td class="px-6 py-3 text-xs font-semibold">${l.kelas}</td>
-          <td class="px-6 py-3 text-xs font-bold text-indigo-700">${l.jenisAbsen || (l.method && l.method.split('|')[1]) || 'Masuk Sekolah'}</td>
-          <td class="px-6 py-3"><span class="px-2.5 py-0.5 rounded-full text-xs font-bold ${getBadgeStyle(l.status)}">${l.status}</span></td>
-          <td class="px-6 py-3 text-xs text-slate-500">${l.peran || 'Siswa'}</td>
+          <td class="px-6 py-3.5 font-mono text-xs"><span class="font-bold text-slate-700">${formatDateStandard(l.date)}</span> <span class="text-indigo-600 font-bold ml-1">${l.time}</span></td>
+          <td class="px-6 py-3.5 font-mono text-xs font-bold text-slate-700">${l.nisn}</td>
+          <td class="px-6 py-3.5 font-bold text-slate-800">${l.nama}</td>
+          <td class="px-6 py-3.5 text-xs"><span class="px-2.5 py-1 bg-slate-100 font-bold rounded-lg">${l.kelas}</span></td>
+          <td class="px-6 py-3.5 text-xs font-bold text-slate-700">${l.jenisAbsen || 'Masuk Sekolah'}</td>
+          <td class="px-6 py-3.5"><span class="px-2.5 py-1 rounded-full text-xs font-bold ${getBadgeStyle(l.status)}">${l.status}</span></td>
+          <td class="px-6 py-3.5 text-xs font-semibold text-slate-500">${l.peran || 'Siswa'}</td>
         </tr>`).join('');
     }
 
-    function getBadgeStyle(status) {
-      if (status === 'Hadir') return 'bg-emerald-100 text-emerald-700';
-      if (status === 'Terlambat') return 'bg-amber-100 text-amber-700';
-      if (status === 'Izin' || status === 'Sakit') return 'bg-blue-100 text-blue-700';
-      if (status === 'Pulang') return 'bg-indigo-100 text-indigo-700';
-      return 'bg-rose-100 text-rose-700';
-    }
-
-    function initChart() {
-      const ctx = document.getElementById('attendancePieChart')?.getContext('2d');
-      if (!ctx) return;
-      pieChartInstance = new Chart(ctx, { type:'doughnut', data:{ labels:['Hadir','Izin/Sakit/Terlambat','Belum Absen'], datasets:[{ data:[0,0,0], backgroundColor:['#10B981','#F59E0B','#F43F5E'] }] }, options:{ responsive:true, maintainAspectRatio:false, plugins:{ legend:{ display:false } } } });
-    }
-    function updateChart(h, i, a) { if (pieChartInstance) { pieChartInstance.data.datasets[0].data = [h, i, a]; pieChartInstance.update(); } }
-
     function exportRekapCSV() {
-      if (attendanceLogs.length === 0) { alert("Belum ada data absensi untuk diekspor!"); return; }
-      let csv = "Timestamp,Tanggal,Jam,ID_NISN_NIP,Nama,Kelas_Jabatan,JenisAbsen,Status,Peran,Metode\n";
-      attendanceLogs.forEach(l => { csv += `"${l.timestamp}","${l.date}","${l.time}","${l.nisn}","${l.nama}","${l.kelas}","${l.jenisAbsen || (l.method && l.method.split('|')[1]) || 'Masuk Sekolah'}","${l.status}","${l.peran || 'Siswa'}","${l.method || ''}"\n`; });
-      const blob = new Blob([csv], { type: 'text/csv' }); const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a'); a.setAttribute('href', url); a.setAttribute('download', `Rekap_Absensi_${new Date().toISOString().split('T')[0]}.csv`); a.click();
+      if (attendanceLogs.length === 0) { alert("Belum ada data rekap untuk diekspor!"); return; }
+      let csv = "Timestamp,Tanggal,Waktu,ID_NISN_NIP,Nama,Kelas_Jabatan,Sesi_Absen,Status,Peran,Metode\n";
+      attendanceLogs.forEach(l => {
+        csv += `"${l.timestamp}","${formatDateStandard(l.date)}","${l.time}","${l.nisn}","${l.nama}","${l.kelas}","${l.jenisAbsen || 'Masuk Sekolah'}","${l.status}","${l.peran || 'Siswa'}","${l.method || ''}"\n`;
+      });
+      const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csv);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `Rekap_Absensi_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }
 
-    /* ============================
-   Daftar "Belum Absen" & Aksi
-   ============================ */
-function renderBelumAbsenTable() {
+    /* ============ BELUM ABSEN (PERBAIKAN FITUR KUNCI) ============ */
+    function renderBelumAbsenTable() {
       const tbody = document.getElementById('belum-table-body');
       if (!tbody) return;
 
-      // default date = today jika kosong
-      const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
-      const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
-      const classVal = document.getElementById('belum-class-filter')?.value || 'ALL';
-      const roleVal = document.getElementById('belum-role-filter')?.value || 'ALL';
-      const nameSearch = (document.getElementById('belum-name-search')?.value || '').trim().toLowerCase();
+      const dateInputEl = document.getElementById('belum-date-filter');
+      if (!dateInputEl.value) {
+        dateInputEl.value = formatDateStandard(new Date());
+      }
+      const targetDate = formatDateStandard(dateInputEl.value);
+      const selectedClass = document.getElementById('belum-class-filter')?.value || 'ALL';
+      const selectedJenis = document.getElementById('belum-jenis-filter')?.value || 'Masuk Sekolah';
+      const selectedRole = document.getElementById('belum-role-filter')?.value || 'ALL';
+      const nameSearch = document.getElementById('belum-name-search')?.value.trim().toLowerCase() || '';
 
-      // Set ID yang sudah absen pada tanggal+jenis — gunakan helper yang robust
-      const presentIds = new Set();
-      (attendanceLogs || []).forEach(l => {
-        const lDate = getLogDate(l);
-        if (!lDate) return; // jika tidak bisa diparse, abaikan (lebih aman)
-        if (String(lDate) !== String(dateVal)) return;
-        const lJenis = (getLogJenis(l) || 'Masuk Sekolah');
-        if (String(lJenis).trim() !== String(jenisVal).trim()) return;
-        const id = getLogId(l);
-        if (id) presentIds.add(String(id));
+      // 1. Ambil Kumpulan ID yang sudah absen pada Tanggal & Sesi terfilter
+      const alreadyScannedIds = new Set();
+      attendanceLogs.forEach(log => {
+        const logDateStd = formatDateStandard(log.date);
+        const logJenis = log.jenisAbsen || 'Masuk Sekolah';
+        if (logDateStd === targetDate && logJenis === selectedJenis) {
+          alreadyScannedIds.add(String(log.nisn));
+        }
       });
 
-      // Kandidat (gabungan siswa + guru sesuai filter role)
-      let candidates = [];
-      if (roleVal === 'ALL' || roleVal === 'Siswa') {
-        candidates = candidates.concat((students || []).map(s => ({ id: String(s.nisn || ''), nama: s.nama || '', kelas: s.kelas || '', peran: 'Siswa' })));
+      // 2. Gabungkan data Siswa & Guru
+      let allPeople = [];
+      if (selectedRole === 'ALL' || selectedRole === 'Siswa') {
+        students.forEach(s => {
+          allPeople.push({ id: String(s.nisn), nama: s.nama, kelas: s.kelas, peran: 'Siswa' });
+        });
       }
-      if (roleVal === 'ALL' || roleVal === 'Guru') {
-        candidates = candidates.concat((teachers || []).map(g => ({ id: String(g.nip || ''), nama: g.nama || '', kelas: g.jabatan || '', peran: 'Guru' })));
+      if (selectedRole === 'ALL' || selectedRole === 'Guru') {
+        teachers.forEach(g => {
+          allPeople.push({ id: String(g.nip), nama: g.nama, kelas: g.jabatan || 'Guru', peran: 'Guru' });
+        });
       }
 
-      const hasil = candidates.filter(p => {
-        if (!p.id) return false; // abaikan entri tanpa id
-        if (presentIds.has(String(p.id))) return false;
-        if (classVal !== 'ALL' && p.kelas !== classVal) return false;
-        if (nameSearch && !String(p.nama || '').toLowerCase().startsWith(nameSearch)) return false;
-        return true;
+      // 3. Filter yang BELUM pernah melakukan scan pada hari dan jenis sesi tersebut
+      const belumAbsenList = allPeople.filter(p => {
+        const belum = !alreadyScannedIds.has(p.id);
+        const filterKelas = (selectedClass === 'ALL' || p.kelas === selectedClass);
+        const filterNama = (!nameSearch || p.nama.toLowerCase().startsWith(nameSearch));
+        return belum && filterKelas && filterNama;
       });
 
-      if (!hasil || hasil.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400">Tidak ada data — semua sudah mengisi atau filter terlalu sempit</td></tr>`;
+      if (belumAbsenList.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="p-6 text-center text-slate-400 font-semibold">Semua siswa/guru sudah mengisi absensi [${selectedJenis}] pada tanggal ini.</td></tr>`;
         return;
       }
 
-      tbody.innerHTML = hasil.map(p => `
+      tbody.innerHTML = belumAbsenList.map(p => `
         <tr class="hover:bg-slate-50">
-          <td class="px-6 py-3 font-mono text-xs">${p.id}</td>
-          <td class="px-6 py-3 font-bold text-slate-800">${escapeHtml(p.nama)}</td>
-          <td class="px-6 py-3 text-xs">${escapeHtml(p.kelas || '-')}</td>
-          <td class="px-6 py-3 text-xs">${p.peran}</td>
-          <td class="px-6 py-3 text-right">
-            <div class="inline-flex gap-2">
-              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Hadir')" class="px-2 py-1 bg-emerald-500 text-white rounded text-xs font-bold">Hadir</button>
-              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Alfa')" class="px-2 py-1 bg-rose-500 text-white rounded text-xs font-bold">Alfa</button>
-              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Sakit')" class="px-2 py-1 bg-amber-500 text-white rounded text-xs font-bold">Sakit</button>
-              <button onclick="markTidakHadir('${p.id}','${escapeHtml(p.nama)}','${escapeHtml(p.kelas)}','${p.peran}','Izin')" class="px-2 py-1 bg-blue-500 text-white rounded text-xs font-bold">Izin</button>
-            </div>
+          <td class="px-6 py-3.5 font-mono text-xs font-bold text-slate-700">${p.id}</td>
+          <td class="px-6 py-3.5 font-bold text-slate-800">${p.nama}</td>
+          <td class="px-6 py-3.5 text-xs"><span class="px-2.5 py-1 bg-slate-100 font-bold rounded-lg">${p.kelas}</span></td>
+          <td class="px-6 py-3.5 text-xs font-semibold text-slate-500">${p.peran}</td>
+          <td class="px-6 py-3.5">
+            <button onclick="absenManualDirect('${p.id}')" class="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border border-indigo-200 font-bold text-xs rounded-xl">
+              <i class="fa-solid fa-check mr-1"></i> Absenkan
+            </button>
           </td>
-        </tr>
-      `).join('');
+        </tr>`).join('');
     }
 
-// Helper kecil untuk escape (prevent quotes issues in onclick)
-    function escapeHtml(s) { return (s || '').toString().replace(/'/g, "\\'").replace(/"/g, '\\"'); }
-
-    /**
-     * markTidakHadir
-     * status: 'Hadir' | 'Alfa' | 'Sakit' | 'Izin'
-     */
-    async function markTidakHadir(id, nama, kelas, peran, status) {
-      try {
-        const dateVal = (document.getElementById('belum-date-filter')?.value) || new Date().toISOString().split('T')[0];
-        const jenisVal = (document.getElementById('belum-jenis-filter')?.value) || 'Masuk Sekolah';
-
-        // Anti duplikat: cek attendanceLogs (gunakan getLogId & getLogDate & getLogJenis)
-        const already = (attendanceLogs || []).some(l => {
-          const lid = getLogId(l);
-          const lDate = getLogDate(l);
-          const lJenis = getLogJenis(l);
-          return lid && String(lid) === String(id) && lDate === dateVal && String(lJenis).trim() === String(jenisVal).trim();
-        });
-        if (already) { showToast('Sudah terdaftar absen untuk user ini pada sesi/tanggal yang dipilih', 'error'); renderBelumAbsenTable(); return; }
-
-        const now = new Date();
-        const log = {
-          timestamp: now.toLocaleString('id-ID'),
-          date: dateVal,
-          time: now.toLocaleTimeString('id-ID'),
-          nisn: id, // kita simpan ke field nisn agar normalisasi bekerja (id bisa juga NIP)
-          nama: nama,
-          kelas: kelas,
-          jenisAbsen: jenisVal,
-          status: status,
-          peran: peran,
-          method: `Manual|${jenisVal}`
-        };
-
-        // push ke local logs + normalisasi ringan
-        log._id = String(id);
-        attendanceLogs.unshift(log);
-        // pastikan normalized (date already set)
-        updateDashboardStats(); renderRecentTable(); renderRekapTable(); renderBelumAbsenTable();
-        showToast(`Tanda "${status}" disimpan untuk ${nama}`, 'success');
-        showSyncBadge('Menyimpan ke Sheet...', 'loading');
-
-        // Kirim ke backend
-        await apiPost('saveAbsensi', log);
-        showSyncBadge('Tersimpan di Sheet', 'success');
-      } catch (err) {
-        onGASFailure(err);
-      }
+    function absenManualDirect(idCode) {
+      const selectedJenis = document.getElementById('belum-jenis-filter')?.value || 'Masuk Sekolah';
+      setJenisAbsen(selectedJenis);
+      processAttendanceScan(idCode, 'Manual dari Belum Absen');
     }
 
-// Mengembalikan tanggal dalam format YYYY-MM-DD bila memungkinkan, atau '' jika gagal
-    function getLogDate(log) {
-      if (!log) return '';
-      // 1) jika sudah ada date dengan format YYYY-MM-DD
-      if (log.date && /^\d{4}-\d{2}-\d{2}$/.test(String(log.date).trim())) return String(log.date).trim();
-
-      // 2) coba parse dari timestamp (umumnya ISO atau string yang dapat diparse)
-      if (log.timestamp) {
-        const d = new Date(log.timestamp);
-        if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-        // kadang timestamp dari spreadsheet adalah 'dd/mm/yyyy hh:mm' -> coba ubah
-        const tryTs = parseNonIsoDateString(log.timestamp);
-        if (tryTs) return tryTs.toISOString().split('T')[0];
-      }
-
-      // 3) coba parse dari field date yang bukan ISO (mis. '29/07/2026' atau '29-07-2026')
-      if (log.date) {
-        const d2 = parseNonIsoDateString(log.date);
-        if (d2) return d2.toISOString().split('T')[0];
-      }
-
-      // 4) fallback kosong (lebih aman: jangan anggap hari ini, agar tidak mengacaukan data)
-      return '';
-    }
-function parseNonIsoDateString(s) {
-      if (!s) return null;
-      s = String(s).trim();
-      // dd/mm/yyyy or dd-mm-yyyy
-      let m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+.*)?$/);
-      if (m) {
-        const day = parseInt(m[1],10), month = parseInt(m[2],10)-1, year = parseInt(m[3],10);
-        const d = new Date(year, month, day);
-        if (!isNaN(d.getTime())) return d;
-      }
-      // yyyy-mm-dd or yyyy/mm/dd
-      m = s.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})/);
-      if (m) {
-        const year = parseInt(m[1],10), month = parseInt(m[2],10)-1, day = parseInt(m[3],10);
-        const d = new Date(year, month, day);
-        if (!isNaN(d.getTime())) return d;
-      }
-      // terakhir coba Date.parse
-      const d3 = new Date(s);
-      if (!isNaN(d3.getTime())) return d3;
-      return null;
-    }
-// Ambil id dari log (bisa nisn, nip, id)
-    function getLogId(log) {
-      if (!log) return '';
-      if (log.nisn && String(log.nisn).trim() !== '') return String(log.nisn).trim();
-      if (log.nip && String(log.nip).trim() !== '') return String(log.nip).trim();
-      if (log.id && String(log.id).trim() !== '') return String(log.id).trim();
-      return '';
+    function getBadgeStyle(status) {
+      if (status === 'Hadir') return 'bg-emerald-100 text-emerald-800';
+      if (status === 'Terlambat') return 'bg-amber-100 text-amber-800';
+      if (status === 'Izin' || status === 'Sakit') return 'bg-indigo-100 text-indigo-800';
+      if (status === 'Pulang') return 'bg-blue-100 text-blue-800';
+      return 'bg-slate-100 text-slate-800';
     }
 
-// Ambil jenis absen dari log (dari properti jenisAbsen atau method "xxx|Jenis")
-    function getLogJenis(log) {
-      if (!log) return 'Masuk Sekolah';
-      if (log.jenisAbsen && String(log.jenisAbsen).trim() !== '') return String(log.jenisAbsen).trim();
-      if (log.method && String(log.method).indexOf('|') !== -1) {
-        const parts = String(log.method).split('|');
-        return (parts[1] || 'Masuk Sekolah').trim();
-      }
-      if (log.method && String(log.method).trim() !== '') {
-        return String(log.method).trim();
-      }
-      return 'Masuk Sekolah';
-    }
-// Normalisasi seluruh attendanceLogs yang diterima dari backend
-    function normalizeAttendanceLogs() {
-      attendanceLogs = (attendanceLogs || []).map(orig => {
-        const l = Object.assign({}, orig);
-        // pastikan id dalam bentuk string konsisten
-        const id = getLogId(l);
-        if (!l.nisn && l.nip) l.nisn = String(l.nip);
-        if (!l.nisn && l.id) l.nisn = String(l.id);
-        if (!l.nisn && id) l.nisn = id;
-
-        // normalisasi date -> YYYY-MM-DD (jika tidak bisa di-parse, kosongkan agar tidak keliru)
-        l.date = getLogDate(l);
-
-        // normalisasi jenisAbsen
-        l.jenisAbsen = getLogJenis(l);
-
-        // normalisasi status
-        l.status = (l.status && String(l.status).trim()) || 'Hadir';
-
-        // simpan juga _id supaya mudah digunakan
-        l._id = String(getLogId(l) || '');
-
-        return l;
+    /* ============ CHART.JS ============ */
+    function initChart() {
+      const ctx = document.getElementById('attendancePieChart'); if (!ctx) return;
+      pieChartInstance = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: ['Hadir', 'Izin / Sakit / Terlambat', 'Belum Absen'],
+          datasets: [{ data: [0, 0, 0], backgroundColor: ['#10b981', '#f59e0b', '#f43f5e'] }]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } } }
       });
+    }
+
+    function updateChart(hadir, izin, alpa) {
+      if (pieChartInstance) {
+        pieChartInstance.data.datasets[0].data = [hadir, izin, alpa];
+        pieChartInstance.update();
+      }
     }
   </script>
 </body>
