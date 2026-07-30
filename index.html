@@ -1157,47 +1157,43 @@ function tampilkanDataBelumAbsen(data) {
 }
     
 function prosesTutupAbsen() {
+  // Mengambil tanggal dari input filter 'belum-date-filter'
   var inputTanggal = document.getElementById("belum-date-filter");
   var tanggalDipilih = inputTanggal ? inputTanggal.value : "";
   
   if (!tanggalDipilih) {
-    alert("Pilih tanggal terlebih dahulu!");
+    alert("Pilih tanggal pada filter terlebih dahulu!");
     return;
   }
 
-  if (confirm("Apakah Anda yakin ingin menutup presensi tanggal " + tanggalDipilih + "?")) {
+  if (confirm("Apakah Anda yakin ingin menutup presensi tanggal " + tanggalDipilih + "? Siswa/Guru yang belum absen akan otomatis dicatat permanen.")) {
+    
     var btn = document.getElementById("btnTutupAbsen");
     if (btn) {
       btn.disabled = true;
       btn.innerText = "⏳ Memproses...";
     }
-
-    // Ganti URL ini dengan URL Web App (Exec) Google Apps Script Anda
-    var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfAsoOabMo7r8_DJhPaDbRztXrPlxp_FQfXmPvUThJ91rr85LjL66XGFTNJew8RF027g/exec";
-
-    fetch(SCRIPT_URL, {
-      method: "POST",
-      body: JSON.stringify({
-        action: "kunciPresensi",
-        tanggal: tanggalDipilih
+    
+    google.script.run
+      .withSuccessHandler(function(respon) {
+        alert(respon);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = "🔒 Tutup Presensi";
+        }
+        // Jalankan ulang render tabel jika ada
+        if (typeof renderBelumAbsenTable === 'function') {
+          renderBelumAbsenTable();
+        }
       })
-    })
-    .then(res => res.text())
-    .then(respon => {
-      alert(respon);
-      if (btn) {
-        btn.disabled = false;
-        btn.innerText = "🔒 Tutup Presensi";
-      }
-      if (typeof renderBelumAbsenTable === 'function') renderBelumAbsenTable();
-    })
-    .catch(err => {
-      alert("Gagal memproses: " + err);
-      if (btn) {
-        btn.disabled = false;
-        btn.innerText = "🔒 Tutup Presensi";
-      }
-    });
+      .withFailureHandler(function(err) {
+        alert("Gagal: " + err.message);
+        if (btn) {
+          btn.disabled = false;
+          btn.innerText = "🔒 Tutup Presensi";
+        }
+      })
+      .kunciPresensiHarian(tanggalDipilih);
   }
 }
   </script>
