@@ -492,7 +492,9 @@
       </form>
     </div>
   </div>
-
+<button id="btnTutupAbsen" onclick="prosesTutupAbsen()" class="btn btn-danger">
+  🔒 Tutup Presensi Hari Ini
+</button>
   <script>
     const API_URL = 'https://script.google.com/macros/s/AKfycbwfAsoOabMo7r8_DJhPaDbRztXrPlxp_FQfXmPvUThJ91rr85LjL66XGFTNJew8RF027g/exec';
 
@@ -1147,11 +1149,7 @@ function tampilkanDataBelumAbsen(data) {
   console.log("Daftar siswa belum absen:", data);
   // Kode Anda untuk merender data ke tabel HTML
 }
-    <button id="btnTutupAbsen" onclick="prosesTutupAbsen()" class="btn btn-danger">
-  🔒 Tutup Presensi Hari Ini
-</button>
-
-<script>
+    
 function prosesTutupAbsen() {
   var tanggalDipilih = document.getElementById("inputTanggal").value; // Ambil tanggal dari filter
   
