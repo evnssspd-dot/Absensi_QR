@@ -1147,6 +1147,33 @@ function tampilkanDataBelumAbsen(data) {
   console.log("Daftar siswa belum absen:", data);
   // Kode Anda untuk merender data ke tabel HTML
 }
+    <button id="btnTutupAbsen" onclick="prosesTutupAbsen()" class="btn btn-danger">
+  🔒 Tutup Presensi Hari Ini
+</button>
+
+<script>
+function prosesTutupAbsen() {
+  var tanggalDipilih = document.getElementById("inputTanggal").value; // Ambil tanggal dari filter
+  
+  if (!tanggalDipilih) {
+    alert("Pilih tanggal terlebih dahulu!");
+    return;
+  }
+
+  if (confirm("Apakah Anda yakin ingin menutup presensi tanggal " + tanggalDipilih + "? Siswa yang belum absen akan otomatis dicatat Alpha/Permanen.")) {
+    
+    // Matikan tombol sementara agar tidak diklik 2x
+    document.getElementById("btnTutupAbsen").disabled = true;
+    
+    google.script.run
+      .withSuccessHandler(function(respon) {
+        alert(respon);
+        document.getElementById("btnTutupAbsen").disabled = false;
+        // Refresh tabel presensi Anda di sini
+      })
+      .kunciPresensiHarian(tanggalDipilih);
+  }
+}
   </script>
 </body>
 </html>
