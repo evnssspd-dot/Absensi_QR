@@ -1172,19 +1172,21 @@ function prosesTutupAbsen() {
       btn.innerText = "⏳ Memproses...";
     }
 
-    // Ganti URL ini dengan URL Web App (Exec) Google Apps Script Anda
+    // Masukkan parameter action dan tanggal menggunakan FormData
+    var formData = new FormData();
+    formData.append("action", "kunciPresensi");
+    formData.append("tanggal", tanggalDipilih);
+
+    // Ganti URL dengan URL Web App (Exec) Anda
     var SCRIPT_URL = "https://script.google.com/macros/s/AKfycbwfAsoOabMo7r8_DJhPaDbRztXrPlxp_FQfXmPvUThJ91rr85LjL66XGFTNJew8RF027g/exec";
 
     fetch(SCRIPT_URL, {
       method: "POST",
-      body: JSON.stringify({
-        action: "kunciPresensi",
-        tanggal: tanggalDipilih
-      })
+      body: formData
     })
-    .then(res => res.text())
+    .then(res => res.json())
     .then(respon => {
-      alert(respon);
+      alert(respon.message || "Presensi berhasil dikunci!");
       if (btn) {
         btn.disabled = false;
         btn.innerText = "🔒 Tutup Presensi";
