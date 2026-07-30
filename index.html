@@ -336,54 +336,46 @@
         </div>
       </section>
 
-     <!-- BELUM ABSEN VIEW (RESTORED ACTIONS) -->
-<section id="view-belum" class="page-view space-y-6 hidden">
-  <div class="bg-white rounded-3xl border shadow-xs overflow-hidden">
-    <div class="p-6 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-      <div>
-        <h3 class="font-bold text-slate-800 text-lg">Daftar Belum Mengisi Absensi</h3>
-        <p class="text-xs text-slate-500">Realtime & Tersimpan di Sheet "BelumAbsen"</p>
-      </div>
-      <div class="flex flex-wrap items-center gap-3">
-        <input type="date" id="belum-date-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
-        <select id="belum-class-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
-          <option value="ALL">Semua Kelas</option>
-        </select>
-        <select id="belum-jenis-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
-          <option value="Masuk Sekolah">Masuk Sekolah</option>
-          <option value="Shalat Duha">Shalat Duha</option>
-          <option value="Shalat Dzuhur">Shalat Dzuhur</option>
-          <option value="Pulang">Pulang</option>
-        </select>
-        <select id="belum-role-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
-          <option value="ALL">Semua (Siswa & Guru)</option>
-          <option value="Siswa">Siswa</option>
-          <option value="Guru">Guru</option>
-        </select>
-        <input type="text" id="belum-name-search" placeholder="Cari nama..." oninput="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs">
-        
-        <!-- TOMBOL TUTUP PRESENSI (Di dalam container filter Belum Absen) -->
-        <button type="button" id="btnTutupAbsen" onclick="prosesTutupAbsen()" class="px-3 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-xl text-xs font-semibold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer">
-          🔒 Tutup Presensi
-        </button>
-      </div>
-    </div>
-    <div class="overflow-x-auto">
-      <table class="w-full text-left text-sm">
-        <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-          <tr>
-            <th class="px-6 py-3.5">ID / NISN / NIP</th>
-            <th class="px-6 py-3.5">Nama</th>
-            <th class="px-6 py-3.5">Kelas / Jabatan</th>
-            <th class="px-6 py-3.5">Peran</th>
-            <th class="px-6 py-3.5 text-center">Aksi Manual</th>
-          </tr>
-        </thead>
-        <tbody id="belum-table-body" class="divide-y divide-slate-100"></tbody>
-      </table>
-    </div>
-  </div>
-</section>
+      <!-- BELUM ABSEN VIEW (RESTORED ACTIONS) -->
+      <section id="view-belum" class="page-view space-y-6 hidden">
+        <div class="bg-white rounded-3xl border shadow-xs overflow-hidden">
+          <div class="p-6 border-b flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div><h3 class="font-bold text-slate-800 text-lg">Daftar Belum Mengisi Absensi</h3><p class="text-xs text-slate-500">Realtime & Tersimpan di Sheet "BelumAbsen"</p></div>
+            <div class="flex flex-wrap items-center gap-3">
+              <input type="date" id="belum-date-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+              <select id="belum-class-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                <option value="ALL">Semua Kelas</option>
+              </select>
+              <select id="belum-jenis-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                <option value="Masuk Sekolah">Masuk Sekolah</option>
+                <option value="Shalat Duha">Shalat Duha</option>
+                <option value="Shalat Dzuhur">Shalat Dzuhur</option>
+                <option value="Pulang">Pulang</option>
+              </select>
+              <select id="belum-role-filter" onchange="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs font-semibold">
+                <option value="ALL">Semua (Siswa & Guru)</option>
+                <option value="Siswa">Siswa</option>
+                <option value="Guru">Guru</option>
+              </select>
+              <input type="text" id="belum-name-search" placeholder="Cari nama..." oninput="renderBelumAbsenTable()" class="px-3 py-2 bg-slate-50 border rounded-xl text-xs">
+            </div>
+          </div>
+          <div class="overflow-x-auto">
+            <table class="w-full text-left text-sm">
+              <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th class="px-6 py-3.5">ID / NISN / NIP</th>
+                  <th class="px-6 py-3.5">Nama</th>
+                  <th class="px-6 py-3.5">Kelas / Jabatan</th>
+                  <th class="px-6 py-3.5">Peran</th>
+                  <th class="px-6 py-3.5 text-center">Aksi Manual</th>
+                </tr>
+              </thead>
+              <tbody id="belum-table-body" class="divide-y divide-slate-100"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
 
       <!-- PROFIL SEKOLAH VIEW -->
       <section id="view-profil" class="page-view space-y-6 hidden">
@@ -500,7 +492,9 @@
       </form>
     </div>
   </div>
-
+<button id="btnTutupAbsen" onclick="prosesTutupAbsen()" class="btn btn-danger">
+  🔒 Tutup Presensi Hari Ini
+</button>
   <script>
     const API_URL = 'https://script.google.com/macros/s/AKfycbwfAsoOabMo7r8_DJhPaDbRztXrPlxp_FQfXmPvUThJ91rr85LjL66XGFTNJew8RF027g/exec';
 
@@ -1157,41 +1151,23 @@ function tampilkanDataBelumAbsen(data) {
 }
     
 function prosesTutupAbsen() {
-  // Mengambil tanggal dari input filter 'belum-date-filter'
-  var inputTanggal = document.getElementById("belum-date-filter");
-  var tanggalDipilih = inputTanggal ? inputTanggal.value : "";
+  var tanggalDipilih = document.getElementById("inputTanggal").value; // Ambil tanggal dari filter
   
   if (!tanggalDipilih) {
-    alert("Pilih tanggal pada filter terlebih dahulu!");
+    alert("Pilih tanggal terlebih dahulu!");
     return;
   }
 
-  if (confirm("Apakah Anda yakin ingin menutup presensi tanggal " + tanggalDipilih + "? Siswa/Guru yang belum absen akan otomatis dicatat permanen.")) {
+  if (confirm("Apakah Anda yakin ingin menutup presensi tanggal " + tanggalDipilih + "? Siswa yang belum absen akan otomatis dicatat Alpha/Permanen.")) {
     
-    var btn = document.getElementById("btnTutupAbsen");
-    if (btn) {
-      btn.disabled = true;
-      btn.innerText = "⏳ Memproses...";
-    }
+    // Matikan tombol sementara agar tidak diklik 2x
+    document.getElementById("btnTutupAbsen").disabled = true;
     
     google.script.run
       .withSuccessHandler(function(respon) {
         alert(respon);
-        if (btn) {
-          btn.disabled = false;
-          btn.innerText = "🔒 Tutup Presensi";
-        }
-        // Jalankan ulang render tabel jika ada
-        if (typeof renderBelumAbsenTable === 'function') {
-          renderBelumAbsenTable();
-        }
-      })
-      .withFailureHandler(function(err) {
-        alert("Gagal: " + err.message);
-        if (btn) {
-          btn.disabled = false;
-          btn.innerText = "🔒 Tutup Presensi";
-        }
+        document.getElementById("btnTutupAbsen").disabled = false;
+        // Refresh tabel presensi Anda di sini
       })
       .kunciPresensiHarian(tanggalDipilih);
   }
