@@ -1134,6 +1134,19 @@
       a.download = `Rekap_Absensi_${new Date().toISOString().split('T')[0]}.csv`;
       a.click();
     }
+    // Ambil tanggal dari input HTML (misal: '2026-07-30')
+var tanggalDipilih = document.getElementById("inputTanggal").value;
+
+// Panggil fungsi .gs dari HTML
+google.script.run
+  .withSuccessHandler(tampilkanDataBelumAbsen)
+  .getDataBelumAbsen(tanggalDipilih);
+
+// Fungsi callback untuk menampilkan hasilnya di tabel/layar
+function tampilkanDataBelumAbsen(data) {
+  console.log("Daftar siswa belum absen:", data);
+  // Kode Anda untuk merender data ke tabel HTML
+}
   </script>
 </body>
 </html>
